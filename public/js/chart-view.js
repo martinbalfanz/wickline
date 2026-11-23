@@ -8,6 +8,7 @@ import { INDICATORS, PALETTE, UP, DOWN, defaultParams, indicatorLabel, heikinAsh
 import { DrawingLayer, DRAW_COLORS } from './drawings.js';
 import { BandFill, Countdown, TradeLines } from './primitives.js';
 import { engine, scriptStore } from './scripts.js';
+import { BenchmarkFeedCache, alignBenchmarkCloses } from './benchmark-data.js';
 import { esc, formatNumber, formatVolume, uid, withAlpha } from './util.js';
 
 const DAY = 86400;
@@ -141,7 +142,7 @@ function scriptDef(res) {
       min: i.min ?? -1e12, max: i.max ?? 1e12,
       step: i.step ?? (Number.isInteger(i.def) ? 1 : 0.01),
     })),
-    plots: res.plots.map((p) => ({ key: p.key, title: p.title, color: p.color, colorsArr: p.colors, type: p.type, width: p.width })),
+    plots: res.plots.map((p) => ({ key: p.key, title: p.title, color: p.color, colorsArr: p.colors, type: p.type, width: p.width, legend: p.legend !== false })),
     levels: res.hlines.map((h) => h.price),
     levelColors: res.hlines.map((h) => h.color),
     fills: res.fills.map((f) => ({ ...f, consts: res.consts })),
@@ -252,6 +253,8 @@ export class ChartView {
     this.loadingOlder = false;
     this.lastCrosshair = null;
     this.live = new Map();      // indicator id -> entry
+    this.benchmarkFeeds = new BenchmarkFeedCache(createFeed, (sym) => this.refreshBenchmarkScripts(sym));
+    this.benchmarkTfId = this.state.tf;
     this.compareEntries = new Map();
     this.alertList = [];
     this.alertLines = []; this.extLine = null;
@@ -688,6 +691,36 @@ export class ChartView {
     this.hooks.onChange?.(this);
   }
 
+  // Hidden benchmark feeds are independent of visible chart comparisons.
+  getComparedCloses() {
+    const result = {};
+    const tz = this.meta.tzOffset || 0;
+    for (const [symbol, entry] of this.compareEntries) {
+      result[symbol] = alignBenchmarkCloses(this.bars, entry.bars || [], tz, entry.tz || 0);
+    }
+    for (const [symbol] of this.benchmarkFeeds.entries) {
+      const entry = this.benchmarkFeeds.get(symbol, this.state.tf);
+      if (entry) result[symbol] = alignBenchmarkCloses(this.bars, entry.bars, tz, entry.tz);
+    }
+    // Comparing a symbol to itself does not require a second data request.
+    result[this.state.symbol] = this.bars.map((bar) => bar.close);
+    return result;
+  }
+
+  refreshBenchmarkScripts(symbol) {
+    for (const entry of this.live.values()) {
+      if (entry.script && entry.benchmarkSymbols?.includes(symbol)) this.runScript(entry);
+    }
+  }
+
+  pruneScriptBenchmarks() {
+    const requested = new Set();
+    for (const entry of this.live.values()) {
+      if (entry.script) for (const symbol of entry.benchmarkSymbols || []) requested.add(symbol);
+    }
+    this.benchmarkFeeds.prune(requested);
+  }
+
   /** Runs a script indicator in the worker; repeated calls while it runs are coalesced. */
   runScript(entry, now = false) {
     if (!this.bars.length || this.destroyed) return;
@@ -709,9 +742,14 @@ export class ChartView {
     entry.running = true;
     entry.lastRun = performance.now();
     const times = this.bars.map((b) => b.time);
-    engine().run(script.code, this.bars, entry.inst.params, { tfSec: this.tf.sec, symbol: this.state.symbol, strategy: entry.inst.strategy })
+    const runGen = this.loadGen;
+    engine().run(script.code, this.bars, entry.inst.params, {
+      tfSec: this.tf.sec, symbol: this.state.symbol, strategy: entry.inst.strategy,
+      compareCloses: this.getComparedCloses()
+    })
       .then((res) => {
         if (this.destroyed || this.live.get(entry.inst.id) !== entry) return;
+        if (runGen !== this.loadGen) { entry.again = true; return; }
         const hadError = !!entry.error;
         entry.error = null;
         entry.name = script.name;
@@ -732,12 +770,20 @@ export class ChartView {
 
   applyScriptResult(entry, res, times, forceLegend) {
     const def = scriptDef(res);
+    entry.benchmarkSymbols = res.benchmarks || [];
+    for (const symbol of entry.benchmarkSymbols) {
+      if (symbol !== this.state.symbol) this.benchmarkFeeds.ensure(symbol, this.tf, this.state.tf);
+    }
+    this.pruneScriptBenchmarks();
+    const previousDashboard = JSON.stringify(entry.dashboard || null);
+    entry.dashboard = res.meta.dashboard || null;
+    const dashboardChanged = previousDashboard !== JSON.stringify(entry.dashboard);
     // Fill in default input values the first time (so settings show them).
     let changedParams = false;
     for (const p of def.params) {
       if (entry.inst.params[p.key] === undefined) { entry.inst.params[p.key] = p.def; changedParams = true; }
     }
-    const sig = JSON.stringify([def.overlay, def.plots.map((p) => [p.key, p.type, p.width]), def.levels, def.fills.map((f) => [f.from, f.to])]);
+    const sig = JSON.stringify([def.overlay, def.plots.map((p) => [p.key, p.type, p.width, p.legend]), def.levels, def.fills.map((f) => [f.from, f.to])]);
     const structural = sig !== entry.sig;
     if (structural) {
       this.removeEntrySeries(entry);
@@ -767,7 +813,7 @@ export class ChartView {
       entry.markersApi.setMarkers([]);
     }
     if (res.strategy) this.applyStrategy(entry, res.strategy, times);
-    if (structural || forceLegend) this.buildLegend();
+    if (structural || forceLegend || dashboardChanged) this.buildLegend();
     else this.updateLegend(this.lastCrosshair);
     if (changedParams) this.hooks.onChange?.(this);
     if (res.strategy) this.hooks.onStrategy?.(this, entry);
@@ -900,6 +946,7 @@ export class ChartView {
     if (!entry) return;
     this.removeIndicatorSeries(entry);
     this.state.indicators = this.state.indicators.filter((i) => i.id !== id);
+    this.pruneScriptBenchmarks();
     if (settings.view === this) closeSettings();
     this.buildLegend();
     this.hooks.onChange?.(this);
@@ -1011,6 +1058,7 @@ export class ChartView {
     this.feed?.close();
     this.feed = null;
     for (const e of this.compareEntries.values()) e.feed?.close();
+    this.benchmarkFeeds.clear();
     for (const e of this.live.values()) clearTimeout(e.timer);
     clearTimeout(this.flushTimer);
     this.resizeObserver.disconnect();
@@ -1114,6 +1162,10 @@ export class ChartView {
 
   async load() {
     const gen = ++this.loadGen;
+    if (this.benchmarkTfId !== this.state.tf) {
+      this.benchmarkFeeds.clear();
+      this.benchmarkTfId = this.state.tf;
+    }
     this.pauseReplay();
     this.feed?.close();
     this.feed = null;
@@ -1708,11 +1760,18 @@ export class ChartView {
       e.row = row;
     }
     for (const entry of this.live.values()) {
+      const panel = entry.dashboard;
+      const dashboardHtml = panel ? `<span class="rs-dashboard">
+        <span class="rs-status" data-tone="${panel.tone}">${esc(panel.status)}</span>
+        ${panel.metrics.map((m) => `<span class="rs-metric" data-tone="${m.tone}">
+          <small>${esc(m.label)}</small><b>${esc(m.value)}</b>
+        </span>`).join('')}
+      </span>` : '';
       const row = document.createElement('div');
       row.className = 'lg-row';
       row.dataset.id = entry.inst.id;
       row.innerHTML = `<span class="lg-name">${esc(this.entryLabel(entry))}</span>
-        <span class="lg-vals">${entry.error ? `<span class="lg-err">⚠ ${esc(entry.error)}</span>` : ''}</span>
+        ${dashboardHtml}<span class="lg-vals">${entry.error ? `<span class="lg-err">⚠ ${esc(entry.error)}</span>` : ''}</span>
         <span class="lg-actions">
           ${entry.script ? `<button data-act="code" title="Edit script" aria-label="Edit script">${ICON_CODE}</button>` : ''}
           <button data-act="settings" title="Settings" aria-label="Settings">${ICON_GEAR}</button>
@@ -1778,7 +1837,7 @@ export class ChartView {
     for (const entry of this.live.values()) {
       if (!entry.row || !entry.out || entry.error) continue;
       const k = Math.min(i, (entry.outLen ?? bars.length) - 1);
-      let html = entry.series.map(({ plot }) => {
+      let html = entry.series.filter(({ plot }) => plot.legend !== false).map(({ plot }) => {
         const v = entry.out[plot.key]?.[k];
         if (plot.optional && !Number.isFinite(v)) return '';
         let color = plot.colorFn && Number.isFinite(v) ? plot.colorFn(k, entry.out, bars, plot.key)

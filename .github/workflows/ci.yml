@@ -1,0 +1,19 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, feat/rs-leader-spy]
+  pull_request:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: node --check public/js/chart-view.js && node --check public/js/script-worker.js && node --check public/js/scripts.js && node --check public/js/rs-leader.js && node --check public/js/benchmark-data.js
+      - run: npm test

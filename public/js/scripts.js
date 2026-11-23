@@ -1,6 +1,7 @@
 // User indicator scripts: storage, starter templates, and the engine that runs them in a worker.
 
 import { uid } from './util.js';
+import { RS_LEADER_SCRIPT } from './rs-leader.js';
 
 const KEY = 'wickline.scripts';
 const TIMEOUT_MS = 3000;
@@ -128,6 +129,7 @@ window.addEventListener('storage', (e) => {
 // ---------------------------------------------------------------------------
 
 export const TEMPLATES = [
+  { name: 'MB RS Leader vs SPY', code: RS_LEADER_SCRIPT },
   {
     name: 'Blank indicator',
     code: `// Your indicator. Save with Ctrl+S, put it on the chart with Ctrl+Enter.
