@@ -277,16 +277,20 @@ marker(ta.crossover(fast, slow), { position: 'below', shape: 'up', color: '#0899
 marker(ta.crossunder(fast, slow), { position: 'above', shape: 'down', color: '#F23645', text: 'Sell' });
 ```
 
+The **New ▾ → MB RS Leader vs SPY** starter plots relative strength against SPY, plus 1M/3M/6M relative returns and new relative highs before price highs. It is intended for **daily, weekly and monthly** US stock/ETF charts. SPY loads automatically without adding it with Compare. The `RS AHEAD` marker is a historical event, not a trade signal; it can coexist with a cooling or lagging current RS status. Calculations require sufficient aligned SPY history.
+
 ### API
 
 | | |
 | --- | --- |
 | `indicator(name, { overlay, precision, shortName })` | Name the script. `overlay: true` draws on the price chart, otherwise it gets its own pane. |
 | `input(title, default, { min, max, step, options })` | A setting shown in the indicator's settings: number, `true`/`false`, or a list with `options`. Returns its current value. |
-| `plot(values, { title, color, style, width })` | Draws a series. `style`: `line`, `histogram`, `dots`, `step`. `color` can be one color, an array with a color per bar, or `(i, value) => color`. Returns an id for `fill`. |
+| `plot(values, { title, color, style, width, legend })` | Draws a series. `style`: `line`, `histogram`, `dots`, `step`. `color` can be one color, an array with a color per bar, or `(i, value) => color`. Use `legend: false` for helper plots. Returns an id for `fill`. |
 | `hline(price, { color })` | A dashed horizontal level. |
 | `fill(a, b, { color })` | Shades between two plots (ids from `plot`) or two numbers. |
 | `marker(conditions, { position, shape, color, text })` | A marker on every bar where the condition is true. `position`: `above`/`below`; `shape`: `up`, `down`, `circle`, `square`. |
+| `compareClose('YAHOO:SPY')` | Returns aligned benchmark closes. A hidden feed loads automatically and is shared by active scripts (up to 4 symbols per script). Missing candles are `NaN`. |
+| `dashboard({ status, tone, metrics })` | Shows a compact status and up to 4 performance metrics in the indicator pane. Tones: `positive`, `warning`, `negative`, `neutral`. |
 | `log(...values)` | Prints to the editor's console. |
 | Data | `open high low close volume time hl2 hlc3 ohlc4 bar_index`, `n` (bar count), `symbol`, `timeframe.seconds`, `timeframe.intraday`. |
 | `ta.*` | `sma ema wma rma hma dema tema alma vwma linreg stdev sum cum highest lowest change mom roc shift rsi cci macd bb stoch crossover crossunder cross pivothigh pivotlow`, plus bar-based `atr tr mfi obv wpr vwap psar dmi supertrend`. |
