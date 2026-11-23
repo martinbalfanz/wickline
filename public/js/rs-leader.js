@@ -90,8 +90,11 @@ if (supported && showEvents) {
 }
 
 const k = n - 1, current = trend[k], three = r3[k];
-const rising5 = k >= 5 && Number.isFinite(current) &&
-  Number.isFinite(trend[k - 5]) && current > trend[k - 5];
+const delta5 = k >= 5 && Number.isFinite(current) &&
+  Number.isFinite(trend[k - 5]) ? current - trend[k - 5] : NaN;
+// Ignore tiny movements in the trend oscillator (percentage-point threshold).
+const rising5 = Number.isFinite(delta5) && delta5 > 0.03;
+const falling5 = Number.isFinite(delta5) && delta5 < -0.03;
 let status = supported ? 'LOADING SPY / HISTORY' : 'D / W / M ONLY';
 let tone = 'neutral';
 if (Number.isFinite(current) && Number.isFinite(three)) {
@@ -99,8 +102,10 @@ if (Number.isFinite(current) && Number.isFinite(three)) {
     status = 'BENCHMARK';
   } else if (current > 0 && three > 0 && rising5) {
     status = 'LEADING'; tone = 'positive';
-  } else if (current > 0 && three > 0) {
+  } else if (current > 0 && three > 0 && falling5) {
     status = 'LEADER COOLING'; tone = 'warning';
+  } else if (current > 0 && three > 0) {
+    status = 'OUTPERFORMING'; tone = 'positive';
   } else if (current > 0) {
     status = 'EARLY RECOVERY'; tone = 'warning';
   } else if (three > 0) {
