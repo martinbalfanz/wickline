@@ -1010,3 +1010,30 @@ body.popout .hide-popout { display: none; }
 .hm-tip-grid b { text-align: right; color: var(--text-strong); font-variant-numeric: tabular-nums; font-weight: 600; }
 .hm-tip-grid b.up { color: var(--up); }
 .hm-tip-grid b.down { color: var(--down); }
+
+
+/* Compact, chart-readable indicator dashboards, including RS Leader. */
+.rs-dashboard { display: inline-flex; gap: 5px; align-items: center; flex-wrap: wrap; margin-left: 4px; }
+.rs-status, .rs-metric {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 7px; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--panel); font-size: 10px; font-variant-numeric: tabular-nums;
+  line-height: 1.3; white-space: nowrap; text-shadow: none;
+}
+.rs-status { font-weight: 700; letter-spacing: .025em; }
+.rs-status[data-tone="positive"] { color: #20DDB3; background: rgba(32,221,179,.09); border-color: rgba(32,221,179,.27); }
+.rs-status[data-tone="warning"] { color: #FBBF73; background: rgba(251,191,115,.09); border-color: rgba(251,191,115,.27); }
+.rs-status[data-tone="negative"] { color: #FB7185; background: rgba(251,113,133,.09); border-color: rgba(251,113,133,.27); }
+.rs-status[data-tone="neutral"] { color: var(--muted); }
+.rs-metric small { color: var(--muted); font-size: 9px; }
+.rs-metric b { font-size: 10px; font-weight: 700; color: var(--text-strong); }
+.rs-metric[data-tone="positive"] b { color: #20DDB3; }
+.rs-metric[data-tone="negative"] b { color: #FB7185; }
+.pane-legend:has(.rs-dashboard) { max-width: calc(100% - 20px); }
+.pane-legend:has(.rs-dashboard) .lg-row { flex-wrap: wrap; row-gap: 3px; }
+.pane-legend:has(.rs-dashboard) .lg-vals { opacity: .65; }
+@media (max-width: 850px) {
+  .rs-dashboard { gap: 3px; margin-left: 0; }
+  .rs-status, .rs-metric { padding: 2px 5px; font-size: 9px; }
+  .rs-metric small { font-size: 8px; }
+}
