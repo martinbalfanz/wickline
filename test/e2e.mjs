@@ -131,6 +131,35 @@ app.whenReady().then(async () => {
     check('a new symbol opens with its prices in view', view.auto && view.last <= view.top && view.last >= Math.min(view.bot, view.top) - Math.abs(view.top) * 0.5,
       `last ${view.last} scale ${Math.round(view.bot)}..${Math.round(view.top)}`);
 
+    // 5b. Repeatedly switch between long-history stocks in the SAME chart cell.
+    // The actual newest candle must be visible near the right edge, irrespective of
+    // the prior ticker's history length or the previous zoom/scroll position.
+    await open('YAHOO:AAPL', '1D');
+    for (const symbol of ['YAHOO:NVDA', 'YAHOO:LLY', 'YAHOO:AAPL', 'YAHOO:NVDA']) {
+      await run(`window.__wickline.views()[0].setSymbol(${JSON.stringify(symbol)})`);
+      for (let i = 0; i < 60; i++) {
+        await wait(250);
+        const loaded = await run(`(() => {
+          const v = window.__wickline.views()[0];
+          return v.state.symbol === ${JSON.stringify(symbol)} &&
+            v.feed && v.q('.overlay.loading').hidden && v.bars.length > 250;
+        })()`);
+        if (loaded) break;
+      }
+      await wait(150); // allow autosize and the next-frame viewport correction
+      const position = await run(`(() => {
+        const v = window.__wickline.views()[0], ts = v.chart.timeScale();
+        const last = v.bars.at(-1);
+        return { width: ts.width(), x: last ? ts.timeToCoordinate(last.time) : null,
+          n: v.bars.length, range: ts.getVisibleLogicalRange(),
+          error: v.q('.overlay.error').hidden ? null : v.q('.overlay.error').innerText };
+      })()`);
+      const good = position.width > 0 && Number.isFinite(position.x) &&
+        position.x >= position.width * 0.6 && position.x < position.width;
+      check(`switch to ${symbol} keeps the newest candle visible`, good,
+        `last candle x=${Math.round(position.x)} / width=${Math.round(position.width)}, bars=${position.n}; ${position.error || ''}`);
+    }
+
     // 6. Update notice: a newer release on GitHub (faked here) shows a notice that can be dismissed.
     await win.loadURL(`http://127.0.0.1:${port}/?e2e&page=${++page}`);
     await run(`(() => { const real = window.fetch; window.fetch = (u, o) => String(u).includes('api.github.com')

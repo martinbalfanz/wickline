@@ -49,7 +49,7 @@ function run({ code, data, inputs = {}, ctx = {} }) {
 
   const out = {
     meta: { name: 'Untitled script', short: '', overlay: false, precision: null },
-    inputs: [], plots: [], hlines: [], fills: [], markers: [], consts: {},
+    inputs: [], plots: [], hlines: [], fills: [], markers: [], consts: {}, benchmarks: [],
   };
 
   const toSeries = (v, what) => {
@@ -136,6 +136,18 @@ function run({ code, data, inputs = {}, ctx = {} }) {
     bar_index: Array.from({ length: n }, (_, i) => i),
     timeframe: { seconds: ctx.tfSec || 0, intraday: (ctx.tfSec || 0) < 86400 },
     symbol: ctx.symbol || '',
+    // Request an aligned benchmark series; the chart loads it out of band
+    // and re-runs this script after prices arrive.
+    compareClose(fullSymbol) {
+      const sym = String(fullSymbol).toUpperCase();
+      if (!/^[A-Z0-9^._:/=-]{1,64}$/.test(sym)) throw new Error('compareClose(): invalid symbol');
+      if (!out.benchmarks.includes(sym)) {
+        if (out.benchmarks.length >= 4) throw new Error('compareClose(): 4-symbol limit');
+        out.benchmarks.push(sym);
+      }
+      const values = ctx.compareCloses?.[sym];
+      return Array.isArray(values) && values.length === n ? values : new Array(n).fill(NaN);
+    },
     // declarations
     indicator(name, opts = {}) {
       out.meta.name = String(name || 'Untitled script').slice(0, 60);
@@ -169,7 +181,7 @@ function run({ code, data, inputs = {}, ctx = {} }) {
       out.plots.push({
         key,
         title: String(opts.title || `Plot ${out.plots.length + 1}`).slice(0, 40),
-        color, colors,
+        color, colors, legend: opts.legend !== false,
         type: STYLES.includes(opts.style) ? opts.style : 'line',
         width: opts.width ? Math.max(1, Math.min(4, Number(opts.width))) : undefined,
         values: Float64Array.from(values),
@@ -196,6 +208,19 @@ function run({ code, data, inputs = {}, ctx = {} }) {
           out.markers.push({ i, shape, position, color: opts.color || '#4FA3F7', text: opts.text ? String(opts.text).slice(0, 20) : '' });
         }
       }
+    },
+    dashboard(opts = {}) {
+      const tones = ['positive', 'warning', 'negative', 'neutral'];
+      const tone = (v) => tones.includes(v) ? v : 'neutral';
+      out.meta.dashboard = {
+        status: String(opts.status || '').slice(0, 32),
+        tone: tone(opts.tone),
+        metrics: (Array.isArray(opts.metrics) ? opts.metrics : []).slice(0, 4).map((m) => ({
+          label: String(m?.label || '').slice(0, 18),
+          value: String(m?.value || '').slice(0, 22),
+          tone: tone(m?.tone),
+        })),
+      };
     },
     log(...args) { if (logs.length < 200) logs.push(args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ')); },
     // helpers

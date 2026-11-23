@@ -8,7 +8,7 @@ const KEYWORDS = new Set(['const', 'let', 'var', 'function', 'return', 'if', 'el
   'try', 'catch', 'finally', 'throw', 'Infinity']);
 const API = new Set(['strategy', 'indicator', 'input', 'plot', 'hline', 'fill', 'marker', 'log', 'ta', 'open', 'high', 'low', 'close',
   'volume', 'time', 'hl2', 'hlc3', 'ohlc4', 'bar_index', 'n', 'na', 'nz', 'add', 'sub', 'mul', 'div', 'max', 'min',
-  'iff', 'rgba', 'timeframe', 'symbol', 'Math']);
+  'iff', 'rgba', 'timeframe', 'symbol', 'compareClose', 'dashboard', 'Math']);
 
 function highlight(code) {
   const re = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_$][\w$]*)/g;
@@ -54,11 +54,11 @@ Use normal JavaScript: <code>close.map((c, i) =&gt; c - open[i])</code>.</p>
 <h4>Output</h4>
 <p><code>plot(values, { title, color, style, width })</code> — style: <code>line</code>, <code>histogram</code>,
 <code>dots</code>, <code>step</code>. <code>color</code> can be one color or an array/function with a color per bar.
-Returns an id for <code>fill</code>.</p>
+Set <code>legend: false</code> to hide helper plots in the legend. Returns an id for <code>fill</code>.</p>
 <p><code>hline(70, { color })</code> horizontal level ·
 <code>fill(a, b, { color })</code> shade between two plots (or two numbers) ·
 <code>marker(conditions, { position: 'above'|'below', shape: 'up'|'down'|'circle'|'square', color, text })</code>
-marks every bar where the condition is true · <code>log(...)</code> prints to this console.</p>
+marks every bar where the condition is true · <code>compareClose('YAHOO:QQQ')</code> loads aligned benchmark closes without a visible comparison · <code>dashboard({ status, tone, metrics })</code> adds a compact pane status header · <code>log(...)</code> prints to this console.</p>
 <h4>ta — technical analysis (return arrays)</h4>
 <p><code>sma ema wma rma hma dema tema alma vwma(src, vol, len) linreg stdev sum cum highest lowest
 change mom roc shift(src, k) rsi cci</code> — called as <code>ta.ema(close, 20)</code>.</p>
