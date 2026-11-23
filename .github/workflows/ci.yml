@@ -15,4 +15,5 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      - run: node --check public/js/chart-view.js && node --check public/js/script-worker.js && node --check public/js/scripts.js && node --check public/js/rs-leader.js && node --check public/js/benchmark-data.js
       - run: npm test
