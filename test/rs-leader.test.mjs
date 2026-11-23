@@ -68,7 +68,7 @@ assert.equal(missing.result.plots[2].legend, false, 'cloud helper excluded from 
 
 const ready = run({ 'YAHOO:SPY': spy });
 assert.equal(ready.ok, true, ready.error);
-assert.equal(ready.result.meta.dashboard.status, 'LEADING');
+assert.equal(ready.result.meta.dashboard.status, 'OUTPERFORMING');
 assert.equal(ready.result.meta.dashboard.tone, 'positive');
 assert.equal(ready.result.meta.dashboard.metrics.length, 3);
 assert.ok(ready.result.meta.dashboard.metrics.every(m => m.value.startsWith('+')));
