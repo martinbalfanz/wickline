@@ -1,0 +1,45 @@
+name: Publish a script
+description: Share an indicator or strategy with every Wickline user. It appears in the app's Community tab.
+title: "[Script] "
+labels: ["community-script"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Wickline's **Publish** button fills this in for you. Check it and press **Submit new issue**.
+
+        A check runs your script on test data. If it passes, the script is added to the community library within a few minutes and this issue is closed. **To update it later, edit this issue.** People can like it with a 👍 on this issue.
+  - type: input
+    id: name
+    attributes:
+      label: Script name
+      placeholder: EMA Ribbon
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What it shows or how it trades, in a sentence or two.
+    validations:
+      required: true
+  - type: input
+    id: tags
+    attributes:
+      label: Tags
+      description: Optional, comma separated (for example trend, rsi, breakout).
+  - type: textarea
+    id: code
+    attributes:
+      label: Code
+      description: The whole script. Wickline copies it to your clipboard, so paste it here if the box is empty.
+      render: javascript
+    validations:
+      required: true
+  - type: checkboxes
+    id: license
+    attributes:
+      label: License
+      options:
+        - label: I wrote this script (or have the right to share it), and it may be shared under the MIT license.
+          required: true

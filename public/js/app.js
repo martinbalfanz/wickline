@@ -2,7 +2,9 @@
 // (watchlist, markets, alerts), search, indicators dialog, script editor, pop-out windows
 // and keyboard shortcuts. Each chart is a ChartView.
 
-import { TIMEFRAMES, parseSymbol, displayTicker, SOURCES, loadUniverse, extendedHours } from './datafeed.js';
+import { parseSymbol, displayTicker, SOURCES, loadUniverse, extendedHours } from './datafeed.js';
+import { tfById, tfIdOf } from './timeframes.js';
+import { TimeframeBar, IntervalBox } from './timeframe-ui.js';
 import { INDICATORS, CATEGORIES } from './indicators.js';
 import {
   ChartView, normalizeChartState, cloneChartState, closeSettings, settingsOpen, CHART_TYPES,
@@ -20,6 +22,10 @@ import { AlertManager, CONDITIONS, chime } from './alerts.js';
 import { ScriptEditor } from './script-editor.js';
 import { StrategyTester } from './strategy-tester.js';
 import { scriptStore, TEMPLATES } from './scripts.js';
+import {
+  loadCommunity, communityHtml, communityCount, communityEntry, installedCopy, installCommunity, fetchCommunityCode,
+  setCommunityView, likeUrl, isOfficial, authorLabel,
+} from './community.js';
 import { settings, apiUrl, dataMode } from './env.js';
 import { tdCheckKey } from './twelvedata.js';
 import { checkForUpdate } from './update.js';
@@ -27,31 +33,25 @@ import { Screener } from './screener.js';
 import { NewsPanel } from './news.js';
 import { TradingPanel } from './trading.js';
 import { HeatmapPanel } from './heatmap.js';
+import { OptionsPanel } from './options.js';
 import { $, esc, store, formatNumber, smartDecimals } from './util.js';
+import {
+  LAYOUTS, layoutOf, equalSizes, validSizes, sizesEntry, paneRects, dividers, moveDivider, resetSplit,
+} from './layouts.js';
 
 const POPOUT = new URLSearchParams(location.search).get('popout') === '1';
 if (POPOUT) document.body.classList.add('popout', 'wl-closed');
 
-const LAYOUTS = [
-  { id: '1', n: 1, title: '1 chart' },
-  { id: '2v', n: 2, title: '2 charts, side by side' },
-  { id: '2h', n: 2, title: '2 charts, stacked' },
-  { id: '3', n: 3, title: '3 charts' },
-  { id: '4', n: 4, title: '4 charts' },
-  { id: '6', n: 6, title: '6 charts' },
-];
-
-const LAYOUT_CELLS = {
-  1: [[0, 0, 20, 14]],
-  '2v': [[0, 0, 9.5, 14], [10.5, 0, 9.5, 14]],
-  '2h': [[0, 0, 20, 6.5], [0, 7.5, 20, 6.5]],
-  3: [[0, 0, 9.5, 14], [10.5, 0, 9.5, 6.5], [10.5, 7.5, 9.5, 6.5]],
-  4: [[0, 0, 9.5, 6.5], [10.5, 0, 9.5, 6.5], [0, 7.5, 9.5, 6.5], [10.5, 7.5, 9.5, 6.5]],
-  6: [[0, 0, 6, 6.5], [7, 0, 6, 6.5], [14, 0, 6, 6.5], [0, 7.5, 6, 6.5], [7, 7.5, 6, 6.5], [14, 7.5, 6, 6.5]],
+// A layout's panes drawn in a 20 × 14 box, 1 apart.
+const layoutIcon = (id) => {
+  const l = layoutOf(id);
+  const cell = (r) => {
+    const x = r.x * 20 + (r.x > 0 ? 0.5 : 0), y = r.y * 14 + (r.y > 0 ? 0.5 : 0);
+    const w = (r.x + r.w) * 20 - (r.x + r.w < 0.999 ? 0.5 : 0) - x, h = (r.y + r.h) * 14 - (r.y + r.h < 0.999 ? 0.5 : 0) - y;
+    return `<rect x="${+x.toFixed(2)}" y="${+y.toFixed(2)}" width="${+w.toFixed(2)}" height="${+h.toFixed(2)}" rx="1.2" fill="none" stroke="currentColor" stroke-width="${l.n > 4 ? 1.2 : 1.4}"/>`;
+  };
+  return `<svg viewBox="-1 -1 22 16" width="22" height="16" aria-hidden="true">${paneRects(l, equalSizes(l)).map(cell).join('')}</svg>`;
 };
-const layoutIcon = (id) => `<svg viewBox="-1 -1 22 16" width="22" height="16" aria-hidden="true">${
-  LAYOUT_CELLS[id].map(([x, y, w, h]) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.4"/>`).join('')
-}</svg>`;
 
 const svg = (body) => `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">${body}</svg>`;
 const S = 'stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"';
@@ -105,11 +105,9 @@ const b64decode = (b) => new TextDecoder().decode(Uint8Array.from(atob(b), (c) =
 // Workspace (layout + every chart's settings)
 // ---------------------------------------------------------------------------
 
-const layoutOf = (id) => LAYOUTS.find((l) => l.id === id) || LAYOUTS[0];
-
 function applyHash(state, hash) {
   if (hash.get('s')) state.symbol = hash.get('s');
-  if (hash.get('tf') && TIMEFRAMES.some((t) => t.id === hash.get('tf'))) state.tf = hash.get('tf');
+  if (tfIdOf(hash.get('tf'))) state.tf = tfIdOf(hash.get('tf')); // any timeframe: 45m, 4h, 1D…
 }
 
 // What the charts in a layout share: symbol and timeframe off by default (like TradingView),
@@ -167,7 +165,7 @@ function createView(state) {
     onActivate: (x) => setActive(x),
     onChange: (x) => {
       saveWorkspace();
-      if (x === activeView) { syncHeader(); syncTitle(); watchlistList.setActive(x.state.symbol); tester.render(); newsPanel.syncSymbol(); }
+      if (x === activeView) { syncHeader(); syncTitle(); watchlistList.setActive(x.state.symbol); tester.render(); newsPanel.syncSymbol(); optionsPanel.syncSymbol(); }
       trading.onViewChange(x);
     },
     onStrategy: (x, entry) => tester.onResult(x, entry),
@@ -218,11 +216,104 @@ function applyLayout(id) {
     v.load();
   }
   chartsEl.dataset.layout = layout.id;
+  paneSizes = validSizes(layout, savedSizes[layout.id]);
+  renderPanes();
   setMaximized(null);
   setActive(views[Math.min(ws.active, layout.n - 1)], true);
   renderLayoutMenu();
   saveWorkspace();
 }
+
+// --- Pane sizes ------------------------------------------------------------------------
+// Panes are placed from layouts.js as fractions of the chart area (CSS turns them into
+// positions), with a divider on every edge between panes. Dragging one resizes the panes on
+// either side; double-clicking it makes that split equal again. Sizes are saved per layout.
+const storedSizes = store.get('layoutSizes', null);
+const savedSizes = storedSizes && typeof storedSizes === 'object' && !Array.isArray(storedSizes) ? storedSizes : {};
+let paneSizes = [];
+let splitEls = [];
+
+function placeBox(el, r) {
+  for (const k of ['x', 'y', 'w', 'h']) el.style.setProperty(`--${k}`, +r[k].toFixed(6));
+}
+
+function renderPanes() {
+  const layout = layoutOf(ws.layout);
+  paneRects(layout, paneSizes).forEach((r, i) => {
+    const el = views[i]?.el;
+    if (!el) return;
+    placeBox(el, r);
+    // The 1px line between panes is the gap on their right and bottom edges.
+    el.style.setProperty('--gx', r.x + r.w < 0.9999 ? '1px' : '0px');
+    el.style.setProperty('--gy', r.y + r.h < 0.9999 ? '1px' : '0px');
+  });
+  const list = dividers(layout, paneSizes);
+  if (list.length !== splitEls.length || list.some((d, i) => splitEls[i].dataset.split !== d.id || splitEls[i].dataset.axis !== d.axis)) {
+    for (const el of splitEls) el.remove();
+    splitEls = list.map((d) => {
+      const el = document.createElement('div');
+      el.className = 'split';
+      el.dataset.split = d.id;
+      el.dataset.axis = d.axis;
+      el.title = 'Drag to resize. Double-click for equal sizes.';
+      chartsEl.append(el);
+      return el;
+    });
+  }
+  list.forEach((d, i) => placeBox(splitEls[i], d));
+}
+
+function saveSizes() {
+  if (POPOUT) return;
+  savedSizes[ws.layout] = sizesEntry(layoutOf(ws.layout), paneSizes);
+  store.set('layoutSizes', savedSizes);
+}
+
+chartsEl.addEventListener('pointerdown', (e) => {
+  const el = e.target.closest?.('.split');
+  if (!el || e.button !== 0) return;
+  const layout = layoutOf(ws.layout);
+  const d = dividers(layout, paneSizes).find((x) => x.id === el.dataset.split);
+  if (!d) return;
+  e.preventDefault();
+  const along = d.axis === 'x' ? 'clientX' : 'clientY';
+  const r = chartsEl.getBoundingClientRect();
+  const box = { w: r.width, h: r.height };
+  const from = e[along], start = d.axis === 'x' ? d.x * box.w : d.y * box.h;
+  let at = from, frame = 0;
+  // One update per frame: the charts resize (and redraw) as the panes change size.
+  const apply = () => {
+    frame = 0;
+    paneSizes = moveDivider(layout, paneSizes, d.id, start + at - from, box);
+    renderPanes();
+  };
+  const move = (ev) => { at = ev[along]; if (!frame) frame = requestAnimationFrame(apply); };
+  const up = (ev) => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
+    if (ev.type === 'pointerup') at = ev[along];
+    cancelAnimationFrame(frame);
+    apply();
+    el.classList.remove('on');
+    delete document.body.dataset.resizing;
+    saveSizes();
+  };
+  try { el.setPointerCapture(e.pointerId); } catch { /* not a live pointer (synthetic events) */ }
+  el.classList.add('on');
+  document.body.dataset.resizing = d.axis;
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
+});
+
+chartsEl.addEventListener('dblclick', (e) => {
+  const el = e.target.closest?.('.split');
+  if (!el) return;
+  paneSizes = resetSplit(layoutOf(ws.layout), paneSizes, el.dataset.split);
+  renderPanes();
+  saveSizes();
+});
 
 function setActive(v, force = false) {
   if (!v || (v === activeView && !force)) return;
@@ -241,6 +332,7 @@ function setActive(v, force = false) {
   setToolUI(v.drawings.tool);
   tester.setView(v);
   newsPanel.syncSymbol();
+  optionsPanel.syncSymbol();
   trading.onViewChange(v);
   saveWorkspace();
 }
@@ -320,10 +412,16 @@ function setSync(kind, on) {
 // Header
 // ---------------------------------------------------------------------------
 
-$('#tf-group').innerHTML = TIMEFRAMES.map((t) => `<button class="tf" data-tf="${t.id}">${t.label}</button>`).join('');
-$('#tf-group').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-tf]');
-  if (b) activeView?.setTimeframe(b.dataset.tf);
+// Timeframes (js/timeframe-ui.js): favourite buttons + ▾ menu, and the "Change interval" box
+// that typing a number opens.
+const tfBar = new TimeframeBar($('#tf-group'), {
+  getTf: () => activeView?.state.tf,
+  setTf: (id) => activeView?.setTimeframe(id),
+  onResize: () => fitHeader(),
+});
+const intervalBox = new IntervalBox({
+  apply: (id) => activeView?.setTimeframe(id),
+  search: (text) => search.open('open', text),
 });
 
 $('#chart-type').innerHTML = CHART_TYPES.map(([k, label]) => `<option value="${k}">${label}</option>`).join('');
@@ -332,7 +430,7 @@ $('#ext-btn').addEventListener('click', () => {
   extendedHours.on = !extendedHours.on;
   // Reload intraday stock charts with (or without) pre/post-market bars.
   for (const v of views) {
-    if (v.source === 'YAHOO' && !TIMEFRAMES.find((t) => t.id === v.state.tf)?.daily) v.load();
+    if (v.source === 'YAHOO' && !tfById(v.state.tf).daily) v.load();
   }
   syncHeader();
   toast(extendedHours.on ? 'Extended hours on: pre-market and after-hours trades move the candles'
@@ -345,13 +443,71 @@ $('#ext-btn').addEventListener('click', () => {
  */
 const topbar = $('.topbar');
 const HEADER_STEPS = ['hdr-1', 'hdr-2', 'hdr-3', 'hdr-4', 'hdr-5', 'hdr-6'];
+// If icons alone still don't fit, these move into the "⋯" menu, right-most first. The symbol,
+// timeframes and chart type always stay on the bar.
+const OVERFLOW = ['wl-btn', 'shot-btn', 'pop-btn', 'theme-btn', 'appearance-btn', 'settings-btn', 'log-btn', 'ext-btn',
+  'layout-btn', 'alert-btn', 'tr-btn', 'rp-btn', 'st-btn', 'op-btn', 'nw-btn', 'hm-btn', 'sc-btn', 'ed-btn', 'ind-btn', 'compare-btn'];
+const moreBtn = $('#more-btn');
+const moreMenu = $('#more-menu');
+const overflows = () => topbar.scrollWidth > topbar.clientWidth;
+const shown = (el) => el.offsetParent !== null;
 function fitHeader() {
-  topbar.classList.remove(...HEADER_STEPS);
+  topbar.classList.remove(...HEADER_STEPS, 'hdr-7');
+  for (const el of topbar.querySelectorAll('.ovf')) el.classList.remove('ovf');
+  moreBtn.hidden = true;
   for (const c of HEADER_STEPS) {
-    if (topbar.scrollWidth <= topbar.clientWidth) break;
+    if (!overflows()) break;
     topbar.classList.add(c);
   }
+  if (overflows()) {
+    moreBtn.hidden = false;
+    for (const id of OVERFLOW) {
+      if (!overflows()) break;
+      const b = document.getElementById(id);
+      if (shown(b)) b.classList.add('ovf'); // ones already hidden (Ext off, pop-out window...) stay out of the menu
+    }
+    if (overflows()) topbar.classList.add('hdr-7'); // phones: only the active timeframe (the ▾ lists them all)
+    // No divider left dangling before the spacer or another divider.
+    for (const d of topbar.querySelectorAll('.divider')) {
+      let n = d.nextElementSibling;
+      while (n && !shown(n)) n = n.nextElementSibling;
+      if (!n || n.matches('.divider, .spacer')) d.classList.add('ovf');
+    }
+  }
+  if (moreBtn.hidden) moreMenu.hidden = true;
+  else if (!moreMenu.hidden) renderMoreMenu();
 }
+
+const moreLabel = (b) => b.querySelector('span')?.textContent.trim() || b.title.split(/[:(]/)[0].trim() || b.textContent.trim();
+function renderMoreMenu() {
+  moreMenu.replaceChildren(...OVERFLOW.toReversed().map((id) => document.getElementById(id))
+    .filter((b) => b.classList.contains('ovf'))
+    .map((b) => {
+      const item = document.createElement('button');
+      item.className = `more-item${b.classList.contains('on') ? ' on' : ''}`;
+      item.dataset.for = b.id;
+      item.title = b.title;
+      item.setAttribute('role', 'menuitem');
+      const icon = document.createElement('span');
+      icon.className = 'more-icon';
+      icon.append(...[...b.querySelectorAll('svg')].map((s) => s.cloneNode(true)));
+      const label = document.createElement('span');
+      label.textContent = moreLabel(b);
+      item.append(icon, label);
+      return item;
+    }));
+}
+moreBtn.addEventListener('click', () => {
+  if (!moreMenu.hidden) { moreMenu.hidden = true; return; }
+  renderMoreMenu();
+  openMenu(moreMenu, moreBtn);
+});
+moreMenu.addEventListener('click', (e) => {
+  const item = e.target.closest('[data-for]');
+  if (!item) return;
+  moreMenu.hidden = true;
+  document.getElementById(item.dataset.for).click();
+});
 new ResizeObserver(fitHeader).observe(topbar);
 document.fonts?.ready.then(fitHeader);
 
@@ -359,9 +515,9 @@ function syncHeader() {
   const v = activeView;
   if (!v) return;
   $('#symbol-ticker').textContent = v.ticker;
-  document.querySelectorAll('#tf-group [data-tf]').forEach((b) => b.classList.toggle('on', b.dataset.tf === v.state.tf));
+  tfBar.sync(v.state.tf); // highlights it, adding a button if it isn't a favourite
   // Extended hours only matter for stocks on intraday timeframes.
-  const intraday = !TIMEFRAMES.find((t) => t.id === v.state.tf)?.daily;
+  const intraday = !tfById(v.state.tf).daily;
   $('#ext-btn').hidden = !(v.source === 'YAHOO' && intraday);
   $('#ext-btn').classList.toggle('on', extendedHours.on);
   $('#chart-type').value = v.state.chartType;
@@ -541,10 +697,12 @@ function renderLayoutMenu() {
   $('#layout-btn').title = linked ? 'Chart layout (charts are synced)' : 'Chart layout';
   const check = (kind, label, hint) => `<label class="menu-check" title="${hint}">
       <input type="checkbox" data-sync="${kind}"${sync[kind] ? ' checked' : ''}><span>${label}</span></label>`;
-  layoutMenu.innerHTML = LAYOUTS.map((l) => `
-    <button class="layout-opt${l.id === ws.layout ? ' on' : ''}" data-layout="${l.id}" title="${l.title}">
-      ${layoutIcon(l.id)}<span>${l.title}</span>
-    </button>`).join('')
+  // One row per chart count, a button for each shape.
+  const counts = [...new Set(LAYOUTS.map((l) => l.n))];
+  layoutMenu.innerHTML = `<div class="menu-title">Charts</div>`
+    + counts.map((n) => `<div class="layout-row"><span class="layout-n">${n}</span>${LAYOUTS.filter((l) => l.n === n).map((l) => `
+      <button class="layout-pick${l.id === ws.layout ? ' on' : ''}" data-layout="${l.id}" title="${l.title}" aria-label="${l.title}">${layoutIcon(l.id)}</button>`).join('')}
+    </div>`).join('')
     + `<div class="menu-sep"></div><div class="menu-title">Sync across charts</div>
     ${check('symbol', 'Symbol', 'Changing the symbol on one chart changes it on all charts and pop-out windows')}
     ${check('interval', 'Timeframe', 'Changing the timeframe on one chart changes it on all charts and pop-out windows')}
@@ -565,7 +723,8 @@ function openMenu(menu, anchor, { above = false, side = false } = {}) {
 
 $('#layout-btn').addEventListener('click', () => {
   if (!layoutMenu.hidden) { layoutMenu.hidden = true; return; }
-  openMenu(layoutMenu, $('#layout-btn'));
+  const b = $('#layout-btn');
+  openMenu(layoutMenu, b.classList.contains('ovf') ? moreBtn : b); // picked from the "⋯" menu
 });
 layoutMenu.addEventListener('click', (e) => {
   const b = e.target.closest('[data-layout]');
@@ -579,7 +738,7 @@ layoutMenu.addEventListener('change', (e) => {
 });
 
 document.addEventListener('mousedown', (e) => {
-  for (const [menu, owner] of [[layoutMenu, '#layout-btn'], [toolMenu, '[data-more]']]) {
+  for (const [menu, owner] of [[layoutMenu, '#layout-btn'], [toolMenu, '[data-more]'], [moreMenu, '#more-btn']]) {
     if (!menu.hidden && !menu.contains(e.target) && !e.target.closest(owner)) menu.hidden = true;
   }
 });
@@ -652,13 +811,18 @@ let indCat = 'All';
 
 function renderIndicatorList() {
   const f = $('#ind-search').value.trim().toLowerCase();
-  const cats = ['All', ...CATEGORIES, 'My scripts'];
+  const cats = ['All', ...CATEGORIES, 'My scripts', 'Community'];
   $('#ind-cats').innerHTML = cats.map((c) => {
     const count = c === 'All' ? Object.keys(INDICATORS).length : c === 'My scripts' ? scriptStore.list().length
-      : Object.values(INDICATORS).filter((d) => d.category === c).length;
+      : c === 'Community' ? (communityCount() ?? '')
+        : Object.values(INDICATORS).filter((d) => d.category === c).length;
     return `<button data-cat="${esc(c)}" class="${c === indCat ? 'on' : ''}">${esc(c)}<small>${count}</small></button>`;
   }).join('');
 
+  if (indCat === 'Community') {
+    $('#ind-list').innerHTML = communityHtml(f);
+    return;
+  }
   const match = (name, extra = '') => !f || name.toLowerCase().includes(f) || extra.toLowerCase().includes(f);
   let html = '';
   if (indCat === 'My scripts' || (indCat === 'All' && f)) {
@@ -668,7 +832,7 @@ function renderIndicatorList() {
         <span class="ind-desc">Write your own indicator in JavaScript (opens the script editor)</span></button>`;
     }
     html += scripts.map((s) => `<div class="ind-item ind-script" data-script="${esc(s.id)}" role="button" tabindex="0">
-        <span class="ind-name">${esc(s.name)}</span><span class="ind-desc">Your script</span>
+        <span class="ind-name">${esc(s.name)}</span><span class="ind-desc">${!s.community ? 'Your script' : isOfficial(s.community) ? 'Official Wickline example' : `From the community · by ${esc(authorLabel(s.community))}`}</span>
         <button class="ind-edit" data-edit="${esc(s.id)}">Edit</button></div>`).join('');
     if (indCat === 'My scripts' && !scripts.length) html += '<div class="sr-empty">No saved scripts yet.</div>';
   }
@@ -683,24 +847,76 @@ function renderIndicatorList() {
   $('#ind-list').innerHTML = html || '<div class="sr-empty">No matches</div>';
 }
 
+const rerenderIndicators = () => { if (!indModal.hidden) renderIndicatorList(); };
+
 function openIndicators() {
   indModal.hidden = false;
   $('#ind-search').value = '';
   renderIndicatorList();
   $('#ind-search').focus();
+  loadCommunity({ onDone: rerenderIndicators }); // for the Community count
 }
 
 $('#ind-btn').addEventListener('click', openIndicators);
-$('#ind-search').addEventListener('input', renderIndicatorList);
+let indSearchTimer = 0; // re-render once typing pauses, not on every key
+$('#ind-search').addEventListener('input', () => { clearTimeout(indSearchTimer); indSearchTimer = setTimeout(renderIndicatorList, 100); });
 $('#ind-cats').addEventListener('click', (e) => {
   const b = e.target.closest('[data-cat]');
   if (!b) return;
   indCat = b.dataset.cat;
   renderIndicatorList();
+  if (indCat === 'Community') loadCommunity({ onDone: rerenderIndicators });
 });
 indModal.addEventListener('mousedown', (e) => { if (e.target === indModal) indModal.hidden = true; });
 indModal.querySelector('.close').addEventListener('click', () => { indModal.hidden = true; });
-$('#ind-list').addEventListener('click', (e) => {
+
+/** Community list clicks: sort/filter, publish, retry, code, like, update, or add to the chart. */
+async function onCommunityClick(e) {
+  const t = e.target;
+  const sort = t.closest('[data-cm-sort]'), kind = t.closest('[data-cm-kind]');
+  if (sort || kind) { setCommunityView({ sort: sort?.dataset.cmSort, kind: kind?.dataset.cmKind }); renderIndicatorList(); return true; }
+  if (t.closest('[data-cm-retry]')) { loadCommunity({ refresh: true, onDone: rerenderIndicators }); renderIndicatorList(); return true; }
+  if (t.closest('[data-cm-publish]')) {
+    indModal.hidden = true;
+    editor.open();
+    editor.print('info', 'Open or write the script you want to share, then click Publish (next to Delete).');
+    return true;
+  }
+  const like = t.closest('[data-cm-like]');
+  if (like) { const s = communityEntry(like.dataset.cmLike); if (s) window.open(likeUrl(s), '_blank', 'noopener'); return true; }
+  const code = t.closest('[data-cm-code]');
+  if (code) {
+    const s = communityEntry(code.dataset.cmCode);
+    if (!s) return true;
+    try {
+      const copy = installedCopy(s);
+      if (copy) { indModal.hidden = true; editor.edit(copy.id); return true; }
+      const text = await fetchCommunityCode(s);
+      indModal.hidden = true;
+      if (editor.confirmDiscard()) editor.loadTemplate({ name: `${s.name} by ${authorLabel(s)}`, code: text });
+      editor.open();
+    } catch (err) { toast(err.message); }
+    return true;
+  }
+  const upd = t.closest('[data-cm-update]');
+  const row = t.closest('[data-comm]');
+  if (!upd && !row) return false;
+  const s = communityEntry(upd ? upd.dataset.cmUpdate : row.dataset.comm);
+  if (!s) return true;
+  if (upd && !confirm(`Replace your copy of “${s.name}” with the newest published version? Changes you made to your copy will be lost.`)) return true;
+  try {
+    const id = await installCommunity(s, { update: !!upd });
+    if (upd) { toast(`Updated “${s.name}”`); renderIndicatorList(); return true; }
+    if (!activeView) return true;
+    if (!activeView.hasScript(id)) activeView.addScript(id);
+    indModal.hidden = true;
+    toast(`Added “${s.name}” by ${authorLabel(s)}`);
+  } catch (err) { toast(err.message); }
+  return true;
+}
+
+$('#ind-list').addEventListener('click', async (e) => {
+  if (indCat === 'Community' && await onCommunityClick(e)) return;
   if (!activeView) return;
   const edit = e.target.closest('[data-edit]');
   if (edit) { indModal.hidden = true; editor.edit(edit.dataset.edit); return; }
@@ -731,7 +947,10 @@ $('#ind-list').addEventListener('click', (e) => {
 const editor = new ScriptEditor({ getView: () => activeView, toast });
 $('#ed-btn').addEventListener('click', () => editor.toggle());
 
-const tester = new StrategyTester({ getView: () => activeView, toast });
+const tester = new StrategyTester({
+  getView: () => activeView, toast,
+  browseStrategies: () => { indCat = 'Community'; setCommunityView({ kind: 'strategy' }); openIndicators(); },
+});
 onAppearanceChange(() => tester.applyTheme());
 $('#st-btn').addEventListener('click', () => { tester.setView(activeView); tester.toggle(); });
 
@@ -769,6 +988,13 @@ const newsPanel = new NewsPanel({
   getActiveSymbol: () => activeView?.state.symbol,
 });
 $('#nw-btn').addEventListener('click', () => newsPanel.toggle());
+
+// Options: the option chain of the active chart's symbol; a contract opens its own chart there.
+const optionsPanel = new OptionsPanel({
+  onPick: (full) => activeView?.setSymbol(full),
+  getActiveSymbol: () => activeView?.state.symbol,
+});
+$('#op-btn').addEventListener('click', () => optionsPanel.toggle());
 scriptStore.onChange(() => { if (!indModal.hidden) renderIndicatorList(); });
 
 // ---------------------------------------------------------------------------
@@ -1018,7 +1244,8 @@ document.addEventListener('keydown', (e) => {
     if (!indModal.hidden) { indModal.hidden = true; return; }
     if (!alertModal.hidden) { alertModal.hidden = true; return; }
     if (!appearModal.hidden) { appearModal.hidden = true; return; }
-    if (!layoutMenu.hidden || !toolMenu.hidden) { layoutMenu.hidden = true; toolMenu.hidden = true; return; }
+    if (!layoutMenu.hidden || !toolMenu.hidden || !moreMenu.hidden) { layoutMenu.hidden = true; toolMenu.hidden = true; moreMenu.hidden = true; return; }
+    if (tfBar.closeMenu()) return;
     if (settingsOpen()) { closeSettings(); return; }
     if (activeView?.cancelReplayPick()) { syncHeader(); return; }
     if (activeView?.cancelDrawing()) return;
@@ -1044,6 +1271,13 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key === '/' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); openIndicators(); return; }
+  // A digit opens "Change interval" (45 → 45 minutes, then Enter), like TradingView; tickers
+  // starting with a digit (7203.T) go on to symbol search from there. A letter opens the search.
+  if (!e.ctrlKey && !e.metaKey && !e.shiftKey && /^[0-9]$/.test(e.key)) {
+    e.preventDefault();
+    intervalBox.open(e.key);
+    return;
+  }
   if (!e.ctrlKey && !e.metaKey && /^[a-z0-9^]$/i.test(e.key)) {
     e.preventDefault();
     search.open('open', e.key);
@@ -1060,7 +1294,7 @@ tickClock();
 window.addEventListener('hashchange', () => {
   if (POPOUT || !activeView) return;
   const h = new URLSearchParams(location.hash.slice(1));
-  if (h.get('tf') && TIMEFRAMES.some((t) => t.id === h.get('tf'))) activeView.setTimeframe(h.get('tf'));
+  if (tfIdOf(h.get('tf'))) activeView.setTimeframe(tfIdOf(h.get('tf')));
   if (h.get('s')) activeView.setSymbol(h.get('s'));
 });
 

@@ -5,6 +5,7 @@
 // watchlist and Yahoo's live stream all keep working; they are translated here.
 
 import { settings } from './env.js';
+import { basePlan, aggregateSessions, sessionStart, guessSessionOpen } from './timeframes.js';
 
 const BASE = 'https://api.twelvedata.com';
 
@@ -89,7 +90,7 @@ function fromTd(row) {
   return suffix ? `${row.symbol}.${suffix}` : null;
 }
 
-const TD_INTERVAL = { '1m': '1min', '5m': '5min', '15m': '15min', '30m': '30min', '1h': '1h', '2h': '2h', '4h': '4h', '1D': '1day', '1W': '1week', '1M': '1month' };
+// Twelve Data's intervals are in timeframes.js (NATIVE.twelvedata); others are grouped from them.
 
 /** Current offset (seconds) of a time zone from UTC. */
 export function tzOffset(tz) {
@@ -128,21 +129,41 @@ const precisionFor = (pair, closes) => {
 
 /**
  * Price history. Returns { meta, bars }. `before` (chart time) fetches the bars before it.
+ * `since` (chart time, the start of the current day): for the live poll of a grouped timeframe.
+ * `open`: the session open (seconds after midnight, meta.sessionOpen of the first answer), so
+ * later answers group bars on the same grid.
  */
-export async function tdBars(ticker, tf, { before = null, outputsize = 5000 } = {}) {
+export async function tdBars(ticker, tf, { before = null, outputsize = 5000, since = null, open = null } = {}) {
   const sym = toTd(ticker);
   if (!sym) throw new Error(`${ticker} isn't available from Twelve Data. Futures and some indices need the optional server.`);
-  const params = { ...sym, interval: TD_INTERVAL[tf.id], outputsize: String(outputsize), order: 'ASC' };
+  // A timeframe Twelve Data doesn't have (10m, 3h) comes from a smaller interval, grouped by
+  // session. A short request (the live poll) then still needs the whole current session: from
+  // the day's start when the caller knows it, else a day's worth of the small bars.
+  const plan = basePlan(tf, 'twelvedata');
+  const fromDay = plan.agg && since != null && before == null;
+  if (fromDay) outputsize = 5000; // up to the dates asked for
+  else if (plan.agg) outputsize = Math.min(5000, Math.max(outputsize, Math.ceil(86400 / plan.base.sec) + 2 * plan.factor));
+  const params = { ...sym, interval: plan.native, outputsize: String(outputsize), order: 'ASC' };
   // Pairs (forex, metals, crypto) have no exchange; without this Twelve Data uses Sydney time.
   const pair = sym.symbol.includes('/');
   if (pair) params.timezone = 'UTC';
+  if (fromDay) params.start_date = formatTime(since, false); // exchange time (UTC for pairs), like end_date
   if (before != null) params.end_date = formatTime(before - (tf.daily ? 86400 : 1), tf.daily);
   const j = await tdGet('/time_series', params);
   const values = j.values || [];
-  const bars = values.map((v) => ({
+  let bars = values.map((v) => ({
     time: parseTime(v.datetime), open: +v.open, high: +v.high, low: +v.low, close: +v.close, volume: +(v.volume || 0),
   })).filter((b) => Number.isFinite(b.close));
   bars.sort((a, b) => a.time - b.time);
+  const full = values.length >= outputsize;
+  // Twelve Data has the regular session only, in exchange time: the earliest first bar of a day
+  // is the open. Grouped bars restart there each day (a late first trade doesn't move the grid);
+  // a first bucket cut off by outputsize is dropped, so loading older bars completes it.
+  const sessionOpen = tf.daily ? null : open ?? guessSessionOpen(bars);
+  if (plan.agg) {
+    const anchor = sessionOpen == null ? null : (t) => sessionStart(t, sessionOpen);
+    bars = aggregateSessions(bars, tf.sec, { anchor, trimFirst: !anchor || (full && !fromDay) });
+  }
   const m = j.meta || {};
   const precision = precisionFor(pair, values.slice(-50).map((v) => v.close));
   return {
@@ -154,9 +175,10 @@ export async function tdBars(ticker, tf, { before = null, outputsize = 5000 } = 
       type: m.type || '',
       precision,
       tzOffset: pair ? 0 : tzOffset(m.exchange_timezone),
+      sessionOpen,
     },
     bars,
-    full: values.length >= outputsize,
+    full,
   };
 }
 

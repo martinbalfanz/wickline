@@ -16,6 +16,10 @@ import { technicals, buildRow, insights } from './lib/screener.mjs';
 import { parseFeed, buildNameIndex, buildStories, rankStories, CRYPTO } from './lib/news.mjs';
 import { parseFomc, shapeEcon, shapeEarnings } from './lib/calendar.mjs';
 import { MARKETS, MARKET_ORDER, FX_FALLBACK, usCountries, quoteCapUsd, shapeIntlEarnings, shapeListings, mergeMarkets } from './lib/markets.mjs';
+import { HEATMAP_MARKETS, heatmapMarket } from './lib/heatmap-markets.mjs';
+import { optionsQuery, optionsBody } from './lib/options.mjs';
+import { communityFile, isCommunityPath } from './lib/community.mjs';
+import { parseTf, yahooPlan, aggregateSessions, sessionStart } from './public/js/timeframes.js';
 
 // The app's version (package.json), reported by /api/health for the desktop app's update notice.
 const VERSION = (() => { try { return JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version; } catch { return null; } })();
@@ -35,6 +39,8 @@ const MIME = {
   '.png': 'image/png',
   '.ico': 'image/x-icon',
 };
+
+export const SCRIPT_WORKER_CSP = "default-src 'none'; script-src 'self' 'unsafe-eval'";
 
 // ---------------------------------------------------------------------------
 // Yahoo Finance relay
@@ -75,21 +81,43 @@ async function yahooGet(pathAndQuery, ttlMs) {
   throw lastErr;
 }
 
-// Timeframe → Yahoo request settings.
-// `spacing` is the bar length in seconds, used to merge Yahoo's irregular "live" points.
+// Timeframe → Yahoo request settings: yahooPlan() in public/js/timeframes.js. Any timeframe works:
+// Yahoo's own interval when it has one, else bars grouped by session from a smaller one (2h from
+// 60m, 45m from 15m). `spacing` is the base bar length, used to merge Yahoo's irregular "live" points.
 const DAY = 86400;
-const YAHOO_TF = {
-  '1m':  { interval: '1m',  range: '7d',   live: '1d',  spacing: 60 },
-  '5m':  { interval: '5m',  range: '60d',  live: '1d',  spacing: 300 },
-  '15m': { interval: '15m', range: '60d',  live: '1d',  spacing: 900 },
-  '30m': { interval: '30m', range: '60d',  live: '1d',  spacing: 1800 },
-  '1h':  { interval: '60m', range: '730d', live: '5d',  spacing: 3600 },
-  '2h':  { interval: '60m', range: '730d', live: '5d',  spacing: 3600, aggregate: 2 * 3600 },
-  '4h':  { interval: '60m', range: '730d', live: '5d',  spacing: 3600, aggregate: 4 * 3600 },
-  '1D':  { interval: '1d',  full: true,    live: '5d',  spacing: DAY, daily: true },
-  '1W':  { interval: '1wk', full: true,    live: '1mo', spacing: 7 * DAY, daily: true },
-  '1M':  { interval: '1mo', full: true,    live: '3mo', spacing: 28 * DAY, daily: true },
-};
+
+/**
+ * Session opens from a chart answer's meta, in chart time (exchange time at today's offset, like
+ * the bars): `starts`, each day's open from Yahoo's trading periods (pre-market's when the bars
+ * include it), and `open`, today's as seconds after midnight. US option contracts trade from
+ * 9:30 New York, though Yahoo gives them whole days.
+ */
+function sessionOpens(m, off, prepost) {
+  const option = m.instrumentType === 'OPTION';
+  const at = (p) => {
+    if (!p || !Number.isFinite(p.start) || (Number.isFinite(p.end) && p.end <= p.start)) return null;
+    if (!option) return p.start + off;
+    const g = Number.isFinite(p.gmtoffset) ? p.gmtoffset : off;
+    return Math.floor((p.start + g) / DAY) * DAY + 9.5 * 3600 - g + off;
+  };
+  const tp = m.tradingPeriods;
+  const lists = Array.isArray(tp) ? [tp] : tp ? [prepost && !option ? tp.pre : null, tp.regular] : [];
+  const byDay = new Map(); // chart day → its earliest open
+  for (const list of lists) {
+    for (const p of Array.isArray(list) ? list.flat() : []) {
+      const s = at(p);
+      if (s == null) continue;
+      const d = Math.floor(s / DAY);
+      if (!(byDay.get(d) <= s)) byDay.set(d, s);
+    }
+  }
+  const cur = m.currentTradingPeriod;
+  const today = (prepost && !option ? at(cur?.pre) : null) ?? at(cur?.regular);
+  return {
+    starts: [...byDay.values()].sort((a, b) => a - b),
+    open: today == null ? null : ((today % DAY) + DAY) % DAY,
+  };
+}
 
 function normalizeChart(json, tfCfg) {
   const res = json?.chart?.result?.[0];
@@ -143,7 +171,13 @@ function normalizeChart(json, tfCfg) {
   // Bad prints (mostly pre-market / after-hours) would squash the chart; clip them.
   if (!tfCfg.daily) bars = cleanSpikes(bars);
 
-  if (tfCfg.aggregate) bars = aggregate(bars, tfCfg.aggregate);
+  // Grouped timeframes restart at each session's open (from Yahoo's trading periods; a day they
+  // don't cover starts at its first bar). The chart starts live bars of a new session there too.
+  const sess = tfCfg.daily ? null : sessionOpens(m, off, tfCfg.prepost);
+  if (tfCfg.aggregate) {
+    const anchor = sess.starts.length ? (t) => sessionStart(t, null, sess.starts) : null;
+    bars = aggregateSessions(bars, tfCfg.aggregate, { anchor });
+  }
 
   return {
     meta: {
@@ -155,34 +189,15 @@ function normalizeChart(json, tfCfg) {
       precision: Number.isInteger(m.priceHint) ? m.priceHint : 2,
       price: m.regularMarketPrice,
       tzOffset: off,
+      sessionOpen: sess?.open ?? null, // seconds after midnight, chart time
     },
     bars,
   };
 }
 
-// Build larger bars (e.g. 4h from 1h), anchored to the first bar of each day.
-function aggregate(bars, size) {
-  const out = [];
-  let dayKey = null, anchor = 0, cur = null;
-  for (const b of bars) {
-    const dk = Math.floor(b.time / DAY);
-    if (dk !== dayKey) { dayKey = dk; anchor = b.time; }
-    const bucket = anchor + Math.floor((b.time - anchor) / size) * size;
-    if (cur && cur.time === bucket) {
-      cur.high = Math.max(cur.high, b.high);
-      cur.low = Math.min(cur.low, b.low);
-      cur.close = b.close;
-      cur.volume += b.volume;
-    } else {
-      cur = { ...b, time: bucket };
-      out.push(cur);
-    }
-  }
-  return out;
-}
-
 async function yahooChart(symbol, tf, live, prepost = false) {
-  const cfg = YAHOO_TF[tf];
+  const t = parseTf(tf);
+  const cfg = t && yahooPlan(t);
   if (!cfg) throw Object.assign(new Error(`Unsupported timeframe ${tf}`), { status: 400 });
   // prepost: also pre-market and after-hours bars (intraday only; daily bars are the regular session).
   const params = new URLSearchParams({ interval: cfg.interval, includePrePost: prepost && !cfg.daily ? 'true' : 'false' });
@@ -191,8 +206,21 @@ async function yahooChart(symbol, tf, live, prepost = false) {
   else params.set('range', cfg.range);
   // Round period2 so the cache key stays stable for a minute.
   if (params.has('period2')) params.set('period2', String(Math.floor(Date.now() / 60000) * 60));
+  // Yahoo keeps an option contract's intraday history only as 1-minute bars (the last 7 days):
+  // build other intraday timeframes from those. A contract's symbol (underlying, yymmdd, C/P,
+  // strike × 1000: "SPY261204C00690000") goes there straight away, as its own interval is always empty.
+  const fromMinutes = !cfg.daily && cfg.interval !== '1m';
+  const minutes = async () => {
+    const one = new URLSearchParams({ interval: '1m', range: live ? '1d' : '7d', includePrePost: 'false' });
+    const size = cfg.aggregate || cfg.spacing;
+    const minute = await yahooGet(`/v8/finance/chart/${encodeURIComponent(symbol)}?${one}`, live ? 8000 : 60000);
+    return normalizeChart(minute, { spacing: 60, aggregate: size > 60 ? size : 0 });
+  };
+  if (fromMinutes && /^[A-Z.]{1,6}\d{6}[CP]\d{8}$/.test(symbol)) return minutes();
   const json = await yahooGet(`/v8/finance/chart/${encodeURIComponent(symbol)}?${params}`, live ? 8000 : 60000);
-  return normalizeChart(json, cfg);
+  const out = normalizeChart(json, { ...cfg, prepost: prepost && !cfg.daily });
+  if (fromMinutes && !out.bars.length && out.meta.type === 'OPTION') return { ...out, bars: (await minutes()).bars };
+  return out;
 }
 
 /** Last price, previous close and name for many symbols (Yahoo's spark endpoint, 20 per request). */
@@ -915,6 +943,22 @@ async function handleApi(url, req, res) {
       res.writeHead(200, { 'Content-Type': MIME['.json'], 'Content-Encoding': 'gzip', 'Cache-Control': 'no-store', ...CORS });
       return res.end(body);
     }
+    // The heatmap's other markets (lib/heatmap-markets.mjs): crypto and stock markets outside the US.
+    if (url.pathname === '/api/heatmap') {
+      const market = p.get('market') || '';
+      if (!Object.hasOwn(HEATMAP_MARKETS, market)) return sendJson(res, 400, { error: 'Unknown market' });
+      const body = await heatmapMarket(market, { getYahooSession, getUsCountries });
+      res.writeHead(200, { 'Content-Type': MIME['.json'], 'Content-Encoding': 'gzip', 'Cache-Control': 'no-store', ...CORS });
+      return res.end(body);
+    }
+    // Option chains (lib/options.mjs): Yahoo for US stocks and ETFs, Deribit for BTC and ETH.
+    if (url.pathname === '/api/options') {
+      const q = optionsQuery(p.get('symbol'), p.get('expiry'));
+      if (q.error) return sendJson(res, 400, { error: q.error });
+      const body = await optionsBody(q, { getYahooSession }); // gzipped JSON, cached per fetched chain
+      res.writeHead(200, { 'Content-Type': MIME['.json'], 'Content-Encoding': 'gzip', 'Cache-Control': 'no-store', ...CORS });
+      return res.end(body);
+    }
     if (url.pathname === '/api/news') {
       const symbol = (p.get('symbol') || '').trim().toUpperCase();
       const region = p.get('region') || 'us';
@@ -923,6 +967,17 @@ async function handleApi(url, req, res) {
       return sendJson(res, 200, await news(symbol, region));
     }
     if (url.pathname === '/api/calendar') return sendJson(res, 200, await calendar());
+    if (url.pathname.startsWith('/api/community/')) {
+      const rel = url.pathname.slice('/api/community/'.length);
+      if (!isCommunityPath(rel)) return sendJson(res, 404, { error: 'Not found' });
+      const { body } = await communityFile(rel);
+      res.writeHead(200, {
+        // Script code is served as plain text: the app runs it only in its sandboxed worker.
+        'Content-Type': rel.endsWith('.json') ? MIME['.json'] : 'text/plain; charset=utf-8',
+        'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store', ...CORS,
+      });
+      return res.end(body);
+    }
     if (url.pathname === '/api/yahoo/screener') {
       return sendJson(res, 200, await yahooScreener(p.get('id') || 'most_actives'));
     }
@@ -944,6 +999,9 @@ async function serveFile(filePath, res) {
     res.writeHead(200, {
       'Content-Type': MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream',
       'Cache-Control': 'no-cache',
+      // The worker that runs user and community scripts may load only the app's own modules and
+      // can't reach the network at all (no fetch, WebSocket or imports from other sites).
+      ...(path.basename(filePath) === 'script-worker.js' ? { 'Content-Security-Policy': SCRIPT_WORKER_CSP } : {}),
     });
     res.end(body);
   } catch {
@@ -952,12 +1010,26 @@ async function serveFile(filePath, res) {
   }
 }
 
+// Nothing a request does may stop the server: in the desktop app it runs inside the app itself.
 async function handleRequest(req, res) {
-  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  try {
+    await routeRequest(req, res);
+  } catch {
+    try {
+      if (!res.headersSent) sendJson(res, 500, { error: 'Internal server error' });
+      else res.destroy();
+    } catch { /* the connection is already gone */ }
+  }
+}
+
+async function routeRequest(req, res) {
+  let url;
+  try { url = new URL(req.url, `http://${req.headers.host || 'localhost'}`); } catch { return sendJson(res, 400, { error: 'Bad request' }); }
   if (req.method !== 'GET') { res.writeHead(405); return res.end(); }
   if (url.pathname.startsWith('/api/')) return handleApi(url, req, res);
 
-  const rel = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname);
+  let rel;
+  try { rel = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname); } catch { return sendJson(res, 400, { error: 'Bad path' }); }
   const filePath = path.normalize(path.join(PUBLIC_DIR, rel));
   if (!filePath.startsWith(PUBLIC_DIR + path.sep)) { res.writeHead(403); return res.end(); }
   return serveFile(filePath, res);

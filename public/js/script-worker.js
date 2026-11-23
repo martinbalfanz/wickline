@@ -3,6 +3,40 @@
 
 import { TA } from './indicators.js';
 import { runBacktest } from './backtest.js';
+import { LIMITS } from './script-sanitize.js';
+import { indicatorApi } from './indicator-extensions.js';
+
+// Scripts can be shared publicly, so take away everything that reaches the network, the app's
+// storage or the page before any script runs. (`(() => {}).constructor('return this')()` gets around
+// the BLOCKED names below, so they have to be gone from the worker itself.) The worker's own way to
+// talk to the page is kept here first, out of the scripts' reach. Each script also runs in a worker
+// of its own (scripts.js), so anything a script changes in here can only affect that script.
+// The desktop app also serves this file with a Content-Security-Policy that blocks all network access.
+const post = self.postMessage.bind(self);
+const listen = typeof self.addEventListener === 'function' ? self.addEventListener.bind(self) : null;
+const NETWORK = ['fetch', 'XMLHttpRequest', 'WebSocket', 'WebSocketStream', 'EventSource', 'WebTransport', 'importScripts',
+  'indexedDB', 'caches', 'BroadcastChannel', 'Worker', 'SharedWorker', 'navigator', 'Request', 'cookieStore'];
+// Messages and events: a script can't post results of its own, listen in, or stop the worker.
+const MESSAGING = ['postMessage', 'addEventListener', 'removeEventListener', 'dispatchEvent', 'onmessage', 'onmessageerror',
+  'close', 'Notification'];
+const REMOVE = [...NETWORK, ...MESSAGING];
+for (let o = self; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
+  for (const name of REMOVE) {
+    try {
+      if (Object.prototype.hasOwnProperty.call(o, name)) delete o[name];
+    } catch { /* ignore */ }
+  }
+}
+for (const name of REMOVE) {
+  if (!listen && name === 'onmessage') continue; // the Node tests' stand-in worker is driven through self.onmessage
+  try { Object.defineProperty(self, name, { value: undefined, writable: false, configurable: false }); } catch { /* ignore */ }
+}
+
+// The `ta` library is shared by every run in this worker, so scripts get it frozen: a script can't
+// swap `ta.ema` for its own version in later runs.
+for (const v of [...Object.values(TA), ...Object.values(TA.bars)]) Object.freeze(v);
+Object.freeze(TA.bars);
+Object.freeze(TA);
 
 // User code runs inside its own block, so it may declare names like `max` or `n` itself.
 const PREFIX = '"use strict";{\n';
@@ -72,6 +106,7 @@ function run({ code, data, inputs = {}, ctx = {} }) {
   const ta = { ...TA };
   delete ta.bars;
   for (const [k, fn] of Object.entries(TA.bars)) ta[k] = (...args) => fn(bars, ...args);
+  Object.freeze(ta);
 
   // --- strategy (backtesting) ------------------------------------------------
   const strat = { declared: false, props: {}, entries: [], closes: [], exits: [], onBar: null };
@@ -131,23 +166,12 @@ function run({ code, data, inputs = {}, ctx = {} }) {
 
   const api = {
     strategy,
+    ...indicatorApi(out, ctx, n),
     // data
     open, high, low, close, volume, time, hl2, hlc3, ohlc4, n,
     bar_index: Array.from({ length: n }, (_, i) => i),
-    timeframe: { seconds: ctx.tfSec || 0, intraday: (ctx.tfSec || 0) < 86400 },
+    timeframe: Object.freeze({ seconds: ctx.tfSec || 0, intraday: (ctx.tfSec || 0) < 86400 }),
     symbol: ctx.symbol || '',
-    // Request an aligned benchmark series; the chart loads it out of band
-    // and re-runs this script after prices arrive.
-    compareClose(fullSymbol) {
-      const sym = String(fullSymbol).toUpperCase();
-      if (!/^[A-Z0-9^._:/=-]{1,64}$/.test(sym)) throw new Error('compareClose(): invalid symbol');
-      if (!out.benchmarks.includes(sym)) {
-        if (out.benchmarks.length >= 4) throw new Error('compareClose(): 4-symbol limit');
-        out.benchmarks.push(sym);
-      }
-      const values = ctx.compareCloses?.[sym];
-      return Array.isArray(values) && values.length === n ? values : new Array(n).fill(NaN);
-    },
     // declarations
     indicator(name, opts = {}) {
       out.meta.name = String(name || 'Untitled script').slice(0, 60);
@@ -156,14 +180,16 @@ function run({ code, data, inputs = {}, ctx = {} }) {
       if (opts.precision != null) out.meta.precision = Math.max(0, Math.min(10, Math.round(opts.precision)));
     },
     input(title, def, opts = {}) {
+      if (out.inputs.length >= LIMITS.inputs) throw new Error(`input(): a script can have at most ${LIMITS.inputs} inputs`);
       const key = `in${out.inputs.length}`;
       const type = typeof def === 'boolean' ? 'bool' : typeof def === 'string' ? (opts.options ? 'select' : 'text') : 'number';
       if (type === 'number' && !Number.isFinite(def)) throw new Error(`input("${title}"): default must be a number, true/false or text`);
-      out.inputs.push({
-        key, title: String(title), def, type,
-        options: opts.options ? opts.options.map(String) : undefined,
-        min: opts.min, max: opts.max, step: opts.step,
-      });
+      if (typeof def === 'string' && def.length > LIMITS.text) throw new Error(`input("${title}"): text can be at most ${LIMITS.text} characters`);
+      const options = type === 'select' ? Array.from(opts.options, String) : undefined;
+      if (options && (options.length > LIMITS.options || options.some((o) => o.length > LIMITS.optionText))) {
+        throw new Error(`input("${title}"): at most ${LIMITS.options} options of up to ${LIMITS.optionText} characters`);
+      }
+      out.inputs.push({ key, title: String(title), def, type, options, min: opts.min, max: opts.max, step: opts.step });
       const v = inputs[key];
       if (v === undefined) return def;
       if (type === 'number') return Number.isFinite(Number(v)) ? Number(v) : def;
@@ -171,11 +197,12 @@ function run({ code, data, inputs = {}, ctx = {} }) {
       return String(v);
     },
     plot(series, opts = {}) {
+      if (out.plots.length >= LIMITS.plots) throw new Error(`plot(): a script can draw at most ${LIMITS.plots} plots`);
       const values = toSeries(series, 'plot()');
       const key = `p${out.plots.length}`;
       let color = typeof opts.color === 'string' ? opts.color : '#4FA3F7';
       let colors = null;
-      if (Array.isArray(opts.color)) colors = opts.color.map((c) => (c ? String(c) : null));
+      if (Array.isArray(opts.color)) colors = Array.from({ length: n }, (_, i) => { const c = opts.color[i]; return c ? String(c) : null; });
       else if (typeof opts.color === 'function') colors = values.map((v, i) => { const c = opts.color(i, v); return c ? String(c) : null; });
       if (colors) color = colors.find(Boolean) || color;
       out.plots.push({
@@ -189,12 +216,14 @@ function run({ code, data, inputs = {}, ctx = {} }) {
       return key;
     },
     hline(price, opts = {}) {
+      if (out.hlines.length >= LIMITS.hlines) throw new Error(`hline(): a script can draw at most ${LIMITS.hlines} levels`);
       out.hlines.push({ price: Number(price), color: opts.color || '#8E8A82' });
     },
     fill(a, b, opts = {}) {
+      if (out.fills.length >= LIMITS.fills) throw new Error(`fill(): a script can have at most ${LIMITS.fills} fills`);
       const ref = (x) => {
         if (typeof x === 'number') { const k = `_c${Object.keys(out.consts).length}`; out.consts[k] = x; return k; }
-        if (typeof x === 'string' && /^p\d+$/.test(x)) return x;
+        if (typeof x === 'string' && /^p\d+$/.test(x) && Number(x.slice(1)) < out.plots.length) return x;
         throw new Error('fill(): pass two values returned by plot(), or numbers');
       };
       out.fills.push({ from: ref(a), to: ref(b), color: opts.color || 'rgba(79, 163, 247, 0.12)' });
@@ -203,26 +232,15 @@ function run({ code, data, inputs = {}, ctx = {} }) {
       const c = toSeries(condition, 'marker()');
       const shape = SHAPES[opts.shape] || 'circle';
       const position = POSITIONS[opts.position] || 'aboveBar';
-      for (let i = 0; i < n && out.markers.length < 5000; i++) {
+      for (let i = 0; i < n && out.markers.length < LIMITS.markers; i++) {
         if (c[i] && !Number.isNaN(c[i])) {
           out.markers.push({ i, shape, position, color: opts.color || '#4FA3F7', text: opts.text ? String(opts.text).slice(0, 20) : '' });
         }
       }
     },
-    dashboard(opts = {}) {
-      const tones = ['positive', 'warning', 'negative', 'neutral'];
-      const tone = (v) => tones.includes(v) ? v : 'neutral';
-      out.meta.dashboard = {
-        status: String(opts.status || '').slice(0, 32),
-        tone: tone(opts.tone),
-        metrics: (Array.isArray(opts.metrics) ? opts.metrics : []).slice(0, 4).map((m) => ({
-          label: String(m?.label || '').slice(0, 18),
-          value: String(m?.value || '').slice(0, 22),
-          tone: tone(m?.tone),
-        })),
-      };
+    log(...args) {
+      if (logs.length < LIMITS.logs) logs.push(args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ').slice(0, LIMITS.logText));
     },
-    log(...args) { if (logs.length < 200) logs.push(args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ')); },
     // helpers
     ta,
     na: NaN,
@@ -261,7 +279,7 @@ function run({ code, data, inputs = {}, ctx = {} }) {
   return { ok: true, result: { ...out, logs } };
 }
 
-self.onmessage = ({ data: msg }) => {
+const onMessage = ({ data: msg }) => {
   const started = performance.now();
   let res;
   try {
@@ -270,8 +288,16 @@ self.onmessage = ({ data: msg }) => {
     res = { ok: false, error: String(e?.message || e), line: null, logs: [] };
   }
   res.ms = Math.round(performance.now() - started);
-  const transfer = res.ok ? res.result.plots.map((p) => p.values.buffer) : [];
-  const st = res.ok && res.result.strategy;
-  if (st) transfer.push(st.equity.buffer, st.drawdown.buffer, st.buyHold.buffer);
-  self.postMessage({ id: msg.id, ...res }, transfer);
+  try {
+    const transfer = res.ok ? res.result.plots.map((p) => p.values.buffer) : [];
+    const st = res.ok && res.result.strategy;
+    if (st) transfer.push(st.equity.buffer, st.drawdown.buffer, st.buyHold.buffer);
+    post({ id: msg.id, ...res }, transfer);
+  } catch (e) {
+    // e.g. a result that can't be copied to the page
+    post({ id: msg.id, ok: false, error: `The result can't be sent to the chart: ${String(e?.message || e)}`, line: null, logs: [], ms: res.ms });
+  }
 };
+// A listener (not `onmessage`), added with the function kept before the scripts' reach was cut.
+if (listen) listen('message', onMessage);
+else self.onmessage = onMessage; // the Node tests' stand-in worker

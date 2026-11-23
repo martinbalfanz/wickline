@@ -398,7 +398,7 @@ export class TradingPanel {
         <td class="act"><button class="tb-btn" data-tr="close" data-sym="${esc(sym)}">Close</button></td>
       </tr>`;
     }).join('');
-    if (!rows) return '<div class="st-empty"><b>No open positions</b><span>Use the ticket on the left, or the Buy and Sell buttons on the chart.</span></div>';
+    if (!rows) return '<div class="st-empty"><b>No open positions</b><span>On the left: pick Buy or Sell, set the quantity, then press the order button at the bottom.<br>Or click Buy or Sell on the chart for an instant market order.</span></div>';
     return `<table class="tr-table"><thead><tr><th>Symbol</th><th>Side</th><th class="num">Qty</th><th class="num">Avg price</th><th class="num">Last</th>
       <th class="num">P&amp;L</th><th class="num">%</th><th class="num">Stop loss</th><th class="num">Take profit</th><th class="act">
       <button class="tb-btn" data-tr="close-all">Close all</button></th></tr></thead><tbody>${rows}</tbody></table>`;
@@ -527,9 +527,9 @@ export class TradingPanel {
   renderTicket() {
     const t = this.ticket;
     this.ticketEl.innerHTML = `
-      <div class="tr-side" role="group" aria-label="Side">
-        <button type="button" data-side="buy" class="${t.side === 'buy' ? 'on' : ''}">Buy</button>
-        <button type="button" data-side="sell" class="${t.side === 'sell' ? 'on' : ''}">Sell</button>
+      <div class="tr-side" role="group" aria-label="Side: choose buy or sell, then place the order with the button at the bottom">
+        <button type="button" data-side="buy" class="${t.side === 'buy' ? 'on' : ''}" aria-pressed="${t.side === 'buy'}">Buy</button>
+        <button type="button" data-side="sell" class="${t.side === 'sell' ? 'on' : ''}" aria-pressed="${t.side === 'sell'}">Sell</button>
       </div>
       <div class="tr-sym-line"><b class="tr-tk"></b><span class="tr-px muted"></span></div>
       <label><span>Type</span><select name="type" class="select">${Object.entries(ORDER_TYPES).map(([k, l]) => `<option value="${k}"${t.type === k ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
@@ -538,7 +538,7 @@ export class TradingPanel {
       <div class="tr-sizes"><span class="muted tr-value"></span>${[10, 25, 50, 100].map((p) => `<button type="button" data-size="${p}" title="${p}% of equity">${p}%</button>`).join('')}</div>
       <label class="tr-br"><input type="checkbox" name="useSl"${t.useSl ? ' checked' : ''}><span>Stop loss</span><input name="sl" type="number" step="any" min="0"><small class="tr-risk-sl"></small></label>
       <label class="tr-br"><input type="checkbox" name="useTp"${t.useTp ? ' checked' : ''}><span>Take profit</span><input name="tp" type="number" step="any" min="0"><small class="tr-risk-tp"></small></label>
-      <button type="submit" class="tr-place"></button>`;
+      <div class="tr-place-bar"><button type="submit" class="tr-place"></button></div>`;
     this.ticketKey = null;
     this.syncTicket();
     this.updateTicket();
@@ -566,7 +566,10 @@ export class TradingPanel {
     if (side && side !== this.ticket.side) {
       this.ticket.side = side;
       this.saveTicket();
-      this.ticketEl.querySelectorAll('[data-side]').forEach((b) => b.classList.toggle('on', b.dataset.side === side));
+      this.ticketEl.querySelectorAll('[data-side]').forEach((b) => {
+        b.classList.toggle('on', b.dataset.side === side);
+        b.setAttribute('aria-pressed', String(b.dataset.side === side));
+      });
       this.ticketPrefill(true); // stops flip sides with the trade
       this.updateTicket();
       return;

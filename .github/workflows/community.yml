@@ -1,0 +1,266 @@
+# The community script library (community/, see community/README.md).
+#  - Publishes scripts people submit with the "Publish a script" issue form (Wickline's Publish
+#    button opens it), and republishes them when the author edits the issue.
+#  - Takes a script down when its issue gets the "removed" label.
+#  - Refreshes like counts (👍 and ❤️ on each script's issue) once a day.
+#
+# Safety: the submitted code only ever runs in the "check" job, which has a read-only token and no
+# secrets. There it runs in a throwaway Docker container with no network (so no internet, no Docker
+# socket and no runner services), a read-only file system, no Linux capabilities and memory and
+# process limits; inside that, in a locked-down Node process (no environment, no file access beyond
+# the app's code, time limit). The runner only takes the one line of JSON the container prints, and
+# checks it before using any of it (scripts/community.mjs verdict). The jobs that can write to the
+# repo never run submitted code; they only copy text into community/.
+#
+# No workflow-wide concurrency: each job has its own group, so an author editing the issue can't
+# cancel a takedown, and the label the issue form adds (a "labeled" event) can't cancel a check.
+name: Community scripts
+
+on:
+  issues:
+    types: [opened, edited, reopened, labeled]
+  schedule:
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check:
+    if: >-
+      github.event_name == 'issues' && github.event.action != 'labeled' &&
+      startsWith(github.event.issue.title, '[Script]') &&
+      !contains(github.event.issue.labels.*.name, 'removed')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    # A newer edit of the issue cancels the check of the older version. Other runs (labels, the
+    # daily likes) get a group of their own, so they never cancel a check.
+    concurrency:
+      group: community-check-${{ github.event_name == 'issues' && github.event.action != 'labeled' && format('issue-{0}', github.event.issue.number) || format('run-{0}', github.run_id) }}
+      cancel-in-progress: true
+    outputs:
+      ok: ${{ steps.check.outputs.ok }}
+      kind: ${{ steps.check.outputs.kind }}
+      summary: ${{ steps.check.outputs.summary }}
+      error: ${{ steps.check.outputs.error }}
+    env:
+      IMAGE: node:24-slim
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Test-run the script (in a container with no network)
+        id: run
+        run: |
+          docker pull --quiet "$IMAGE" > /dev/null
+          install -m 644 "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/check-event.json"
+          docker run --detach --name community-check \
+            --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --memory 512m --memory-swap 512m --pids-limit 64 --cpus 1 \
+            --user 1000:1000 --env HOME=/tmp --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m \
+            --log-driver json-file --log-opt max-size=1m --log-opt max-file=1 \
+            --volume "$PWD:/app:ro" --volume "$RUNNER_TEMP/check-event.json:/event.json:ro" --workdir /app \
+            "$IMAGE" node scripts/community.mjs check /event.json > /dev/null
+          if ! status="$(timeout 120 docker wait community-check)"; then status=timeout; fi
+          docker kill community-check > /dev/null 2>&1 || true
+          # The container's stdout is the result (read by the next step), its stderr the check's log.
+          docker logs community-check > "$RUNNER_TEMP/check-result.json" 2> "$RUNNER_TEMP/check.log" || true
+          docker rm --force community-check > /dev/null 2>&1 || true
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          # The log can contain the script's own text, so show it with workflow commands switched off.
+          token="$(openssl rand -hex 16)"
+          echo "::stop-commands::$token"
+          head -c 20000 "$RUNNER_TEMP/check.log"
+          echo
+          echo "::$token::"
+      - name: Read the result
+        id: check
+        env:
+          RUN_STATUS: ${{ steps.run.outputs.status }}
+        run: node scripts/community.mjs verdict "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/check-result.json"
+
+  publish:
+    needs: check
+    if: needs.check.outputs.ok == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      issues: write
+    # One publish per issue at a time, in order: a newer one waits instead of racing the older one.
+    concurrency:
+      group: community-publish-${{ github.event_name == 'issues' && github.event.action != 'labeled' && format('issue-{0}', github.event.issue.number) || format('run-{0}', github.run_id) }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - id: publish
+        name: Add it to community/ and push
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KIND: ${{ needs.check.outputs.kind }}
+          NUMBER: ${{ github.event.issue.number }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Does the issue have the "removed" label right now? (Stops here if GitHub can't say.)
+          is_removed() {
+            local labels
+            labels="$(gh issue view "$NUMBER" -R "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')" || exit 1
+            grep -qx removed <<< "$labels"
+          }
+          # push_change <message> <command...>: runs the command on the newest main, then commits and
+          # pushes community/. If someone else pushed meanwhile, it starts again.
+          push_change() {
+            local message="$1"; shift
+            for attempt in 1 2 3 4 5; do
+              git fetch --quiet origin "$GITHUB_REF_NAME"
+              git reset --quiet --hard "origin/$GITHUB_REF_NAME"
+              "$@"
+              git add -A community
+              if git diff --cached --quiet; then echo "Nothing changed"; return 0; fi
+              git commit --quiet -m "$message"
+              if git push --quiet origin "HEAD:$GITHUB_REF_NAME"; then return 0; fi
+              sleep $((attempt * 4))
+            done
+            return 1
+          }
+          publish_unless_removed() {
+            if is_removed; then
+              echo "The issue has the removed label: not publishing"
+              echo "action=skipped" >> "$GITHUB_OUTPUT"
+              return 0
+            fi
+            node scripts/community.mjs publish "$GITHUB_EVENT_PATH" "$KIND"
+          }
+          push_change "Community: publish script from #$NUMBER" publish_unless_removed
+          # A takedown that ran just before this push could have found nothing to remove: check again.
+          if is_removed; then
+            echo "action=skipped" >> "$GITHUB_OUTPUT"
+            push_change "Community: remove script from #$NUMBER" node scripts/community.mjs remove "$GITHUB_EVENT_PATH"
+          fi
+      - name: Tell the author
+        if: steps.publish.outputs.action == 'added' || steps.publish.outputs.action == 'updated'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.issue.number }}
+          ACTION: ${{ steps.publish.outputs.action }}
+          SUMMARY: ${{ needs.check.outputs.summary }}
+        run: |
+          gh label create community-script --color 4FA3F7 --description "A script for the Wickline community library" --force -R "$GITHUB_REPOSITORY" || true
+          gh label create published --color 2EBD85 --description "In the Wickline community library" --force -R "$GITHUB_REPOSITORY" || true
+          if [ "$ACTION" = "updated" ]; then WHAT="Updated"; else WHAT="Published"; fi
+          {
+            echo "✅ **$WHAT!** Your script passed the checks ($SUMMARY) and is now in the **Community** tab of every Wickline app. It can take a few minutes to show up."
+            echo
+            echo "To change it, edit this issue (the code, name or description) and it's republished automatically. People can like it with a 👍 on this issue."
+          } > comment.md
+          gh issue comment "$NUMBER" -R "$GITHUB_REPOSITORY" --body-file comment.md
+          gh issue edit "$NUMBER" -R "$GITHUB_REPOSITORY" --add-label community-script,published || true
+          gh issue close "$NUMBER" -R "$GITHUB_REPOSITORY" --reason completed || true
+
+  reject:
+    needs: check
+    if: always() && needs.check.result != 'skipped' && needs.check.result != 'cancelled' && needs.check.outputs.ok != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Tell the author what to fix
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.issue.number }}
+          ERRORS: ${{ needs.check.outputs.error }}
+        run: |
+          {
+            echo "❌ **Not published yet.** The check found a problem:"
+            echo
+            if [ -n "$ERRORS" ]; then printf '%s\n' "$ERRORS"; else echo "- The check couldn't run. A maintainer will take a look."; fi
+            echo
+            echo "Fix it by editing this issue; the check runs again automatically. Tip: paste the script into Wickline's script editor and press Ctrl+Enter to try it on a chart first."
+          } > comment.md
+          gh issue comment "$NUMBER" -R "$GITHUB_REPOSITORY" --body-file comment.md
+
+  remove:
+    if: github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'removed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      issues: write
+    # Never cancelled: no other kind of run shares this group (edits only touch the check and
+    # publish groups), and a second "removed" label waits for the first takedown.
+    concurrency:
+      group: community-remove-${{ github.event.action == 'labeled' && github.event.label.name == 'removed' && format('issue-{0}', github.event.issue.number) || format('run-{0}', github.run_id) }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Take it out of community/ and push
+        id: remove
+        env:
+          NUMBER: ${{ github.event.issue.number }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for attempt in 1 2 3 4 5; do
+            git fetch --quiet origin "$GITHUB_REF_NAME"
+            git reset --quiet --hard "origin/$GITHUB_REF_NAME"
+            node scripts/community.mjs remove "$GITHUB_EVENT_PATH"
+            git add -A community
+            if git diff --cached --quiet; then exit 0; fi
+            git commit --quiet -m "Community: remove script from #$NUMBER"
+            if git push --quiet origin "HEAD:$GITHUB_REF_NAME"; then exit 0; fi
+            sleep $((attempt * 4))
+          done
+          exit 1
+      - if: steps.remove.outputs.removed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.issue.number }}
+        run: |
+          gh issue comment "$NUMBER" -R "$GITHUB_REPOSITORY" --body "This script was removed from the community library."
+          gh issue close "$NUMBER" -R "$GITHUB_REPOSITORY" --reason "not planned" || true
+
+  likes:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: read
+    concurrency:
+      group: community-likes
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Count likes and push
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for attempt in 1 2 3; do
+            git fetch --quiet origin "$GITHUB_REF_NAME"
+            git reset --quiet --hard "origin/$GITHUB_REF_NAME"
+            node scripts/community.mjs likes
+            git add community
+            if git diff --cached --quiet; then exit 0; fi
+            git commit --quiet -m "Community: update like counts"
+            if git push --quiet origin "HEAD:$GITHUB_REF_NAME"; then exit 0; fi
+            sleep $((attempt * 4))
+          done
+          exit 1

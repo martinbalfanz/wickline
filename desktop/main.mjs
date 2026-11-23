@@ -2,7 +2,7 @@
 // Runs the built-in server on this computer — so stocks, ETFs, forex and futures work without
 // any key, using the user's own internet connection — and shows the app in its own window.
 
-import { app, BrowserWindow, Menu, shell } from 'electron';
+import { app, BrowserWindow, Menu, session, shell } from 'electron';
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -76,17 +76,30 @@ function createMainWindow() {
   return win;
 }
 
+/** True for a URL on the app's own local server (compared as origins: `http://127.0.0.1:41573@evil.example/` is not). */
+function isAppUrl(url) {
+  if (!origin) return false;
+  try { return new URL(url).origin === origin; } catch { return false; }
+}
+
+// Permissions the page may use, and only on the app's own pages: alert notifications and copying
+// a script to the clipboard (Publish). Everything else (camera, microphone, location, …) is refused.
+const ALLOWED_PERMISSIONS = new Set(['notifications', 'clipboard-sanitized-write']);
+function allowPermission(permission, url) {
+  return ALLOWED_PERMISSIONS.has(permission) && isAppUrl(url);
+}
+
 // Every window: pop-out charts open as app windows; any other link opens in the system browser.
 app.on('web-contents-created', (_, contents) => {
   contents.setWindowOpenHandler(({ url }) => {
-    if (origin && url.startsWith(origin)) {
+    if (isAppUrl(url)) {
       return { action: 'allow', overrideBrowserWindowOptions: { width: 1100, height: 720, backgroundColor: BG, icon: ICON, webPreferences } };
     }
     if (/^https?:\/\//.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
   contents.on('will-navigate', (e, url) => {
-    if (origin && !url.startsWith(origin)) { e.preventDefault(); if (/^https?:\/\//.test(url)) shell.openExternal(url); }
+    if (origin && !isAppUrl(url)) { e.preventDefault(); if (/^https?:\/\//.test(url)) shell.openExternal(url); }
   });
   // Windows/Linux have no menu bar (Alt+letter menus would steal the drawing shortcuts),
   // so the usual keys for reload, zoom, full screen and developer tools are handled here.
@@ -172,5 +185,13 @@ app.whenReady().then(async () => {
     app.quit();
     return;
   }
+  const ses = session.defaultSession;
+  ses.setPermissionRequestHandler((contents, permission, callback, details) => {
+    callback(allowPermission(permission, details?.requestingUrl || contents?.getURL() || ''));
+  });
+  ses.setPermissionCheckHandler((contents, permission, requestingOrigin, details) => (
+    allowPermission(permission, requestingOrigin || details?.requestingUrl || contents?.getURL() || '')
+  ));
+  ses.setDevicePermissionHandler?.(() => false); // no USB, serial or HID devices
   mainWindow = createMainWindow();
 });

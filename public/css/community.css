@@ -1,0 +1,51 @@
+/* ---------------- Community scripts (Indicators → Community) and the Publish dialog ---------------- */
+
+.cm-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 2px 6px 8px; }
+.cm-bar .spacer { flex: 1; }
+.cm-seg { display: inline-flex; border: 1px solid var(--panel-2); border-radius: var(--radius); overflow: hidden; }
+.cm-seg button { height: 26px; padding: 0 10px; font-size: 12px; color: var(--muted); }
+.cm-seg button + button { border-left: 1px solid var(--panel-2); }
+.cm-seg button:hover { color: var(--text-strong); background: var(--panel-2); }
+.cm-seg button.on { color: var(--accent-text); background: var(--accent-soft); font-weight: 600; }
+.cm-link { font-size: 12px; color: var(--accent-text); }
+.cm-link:hover { text-decoration: underline; }
+
+.ind-item.cm-item { padding-right: 190px; }
+.cm-item .ind-name { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cm-kind {
+  padding: 1px 6px; border-radius: 4px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em;
+  background: var(--panel-2); color: var(--muted); text-transform: uppercase;
+}
+.cm-kind.strategy { color: #E0A21B; }
+.cm-installed { font-size: 11px; font-weight: 600; color: var(--up); }
+/* Official examples vs scripts published by users: decided by the index (no issue = official), not by the author's name. */
+.cm-official { font-weight: 600; color: var(--accent-text); }
+.cm-badge {
+  padding: 0 6px; border-radius: 4px; border: 1px solid var(--panel-2); font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.02em; text-transform: uppercase; color: var(--muted);
+}
+.cm-note { margin: 0 6px 8px; padding: 8px 10px; border-radius: var(--radius); background: var(--panel-2); color: var(--text); font-size: 12.5px; line-height: 1.4; }
+.ind-item.cm-browse { cursor: default; }
+.ind-item.cm-browse:hover { background: none; }
+.cm-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 2px; color: var(--muted); font-size: 11.5px; }
+.cm-meta b { color: var(--text); font-weight: 600; }
+.cm-tag { padding: 0 6px; border-radius: 9px; background: var(--panel-2); font-size: 11px; }
+.cm-actions { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); display: flex; gap: 6px; }
+.cm-actions button, .cm-actions a {
+  display: inline-flex; align-items: center;
+  height: 26px; padding: 0 9px; border-radius: 4px; border: 1px solid var(--panel-2); color: var(--text); font-size: 12px; white-space: nowrap; text-decoration: none;
+}
+.cm-actions button:hover, .cm-actions a:hover { background: var(--panel); color: var(--text-strong); }
+.cm-actions .cm-update { border-color: var(--accent); color: var(--accent-text); }
+.cm-state { padding: 18px 12px; color: var(--muted); }
+.cm-state button { color: var(--accent-text); font-weight: 600; }
+.cm-state button:hover { text-decoration: underline; }
+
+.publish-card { width: min(540px, 100%); }
+.publish-card .form label { grid-template-columns: 100px 1fr; align-items: start; }
+.publish-card .form label > span { padding-top: 8px; }
+.publish-card .form label.set-check { display: flex; }
+.publish-card .form label.set-check > span { padding-top: 0; }
+.publish-card textarea.field { height: auto; min-height: 64px; padding: 8px 10px; resize: vertical; line-height: 1.4; }
+.pub-intro { font-size: 12.5px; color: var(--text); }
+.form-error { margin: 0; padding: 8px 10px; border-radius: var(--radius); background: rgba(236, 82, 70, 0.12); color: var(--down); font-size: 12.5px; }

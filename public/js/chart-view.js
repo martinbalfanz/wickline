@@ -4,12 +4,16 @@
 
 import * as LWC from '../vendor/lightweight-charts.mjs';
 import { createFeed, tfById, parseSymbol, displayTicker, isCryptoSymbol, sourceName } from './datafeed.js';
+import { tfIdOf } from './timeframes.js';
 import { INDICATORS, PALETTE, UP, DOWN, defaultParams, indicatorLabel, heikinAshi, heikinAshiAt } from './indicators.js';
 import { DrawingLayer, DRAW_COLORS } from './drawings.js';
 import { BandFill, Countdown, TradeLines } from './primitives.js';
 import { engine, scriptStore } from './scripts.js';
-import { BenchmarkFeedCache, alignBenchmarkCloses } from './benchmark-data.js';
+import { ScriptBenchmarks } from './benchmark-data.js';
+import { dashboardHtml, entryDashboardChanged } from './indicator-dashboard.js';
 import { focusLatestBars } from './viewport.js';
+import { canRunCommunity } from './community.js';
+import { LIMITS, coerceParams, safeColor } from './script-sanitize.js';
 import { esc, formatNumber, formatVolume, uid, withAlpha } from './util.js';
 
 const DAY = 86400;
@@ -89,15 +93,43 @@ export const defaultIndicators = () => [
   { id: uid(), type: 'rsi', params: { length: 14, source: 'close' } },
 ];
 
+/** A saved indicator, checked: it comes from storage or a pop-out link, so nothing in it is trusted. */
+function normalizeIndicator(i) {
+  const colors = {};
+  if (i.colors && typeof i.colors === 'object') {
+    for (const [k, c] of Object.entries(i.colors)) if (/^[A-Za-z_][\w]{0,40}$/.test(k) && safeColor(c, null)) colors[k] = safeColor(c);
+  }
+  const out = { ...i, id: typeof i.id === 'string' && i.id ? i.id.slice(0, 64) : uid(), colors };
+  if (i.type === 'script') {
+    // The script declares its settings when it runs (applyScriptResult coerces them then); keep plain values.
+    const params = {};
+    for (const [k, v] of Object.entries(i.params && typeof i.params === 'object' ? i.params : {})) {
+      if (/^in\d{1,3}$/.test(k) && (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string')) {
+        params[k] = typeof v === 'string' ? v.slice(0, LIMITS.text) : v;
+      }
+    }
+    out.scriptId = String(i.scriptId).slice(0, 64);
+    out.params = params;
+    if (out.strategy != null && typeof out.strategy !== 'object') delete out.strategy;
+  } else {
+    out.params = coerceParams(i.params, INDICATORS[i.type].params);
+  }
+  return out;
+}
+
 export function normalizeChartState(s = {}) {
   return {
-    symbol: s.symbol || 'BINANCE:BTCUSDT',
-    tf: s.tf || '1h',
+    symbol: typeof s.symbol === 'string' && s.symbol ? s.symbol.slice(0, 100) : 'BINANCE:BTCUSDT',
+    tf: tfIdOf(s.tf) || '1h', // any timeframe (timeframes.js); saved ids stay as they are
     chartType: CHART_TYPES.some(([k]) => k === s.chartType) ? s.chartType : 'candles',
     logScale: !!s.logScale,
     indicators: (Array.isArray(s.indicators) ? s.indicators : defaultIndicators())
-      .filter((i) => i.type === 'script' ? i.scriptId : INDICATORS[i.type]),
-    compares: Array.isArray(s.compares) ? s.compares.filter((c) => c?.symbol) : [],
+      .filter((i) => i && typeof i === 'object' && (i.type === 'script' ? (typeof i.scriptId === 'string' && i.scriptId) : Object.hasOwn(INDICATORS, i.type)))
+      .map(normalizeIndicator),
+    compares: Array.isArray(s.compares)
+      ? s.compares.filter((c) => typeof c?.symbol === 'string' && c.symbol)
+        .map((c) => ({ ...c, symbol: c.symbol.slice(0, 100), color: safeColor(c.color, COMPARE_COLORS[0]) }))
+      : [],
   };
 }
 
@@ -199,9 +231,9 @@ export class ChartView {
       <div class="legend">
         <div class="lg-title"><span class="lg-name"></span><span class="lg-meta"></span>
           <div class="qt" hidden>
-            <button class="qt-sell" data-qt="sell" title="Sell at the market"><small>Sell</small><b class="qt-px">—</b></button>
+            <button class="qt-sell" data-qt="sell" title="One click: sell this quantity at the market now"><small>Sell</small><b class="qt-px">—</b></button>
             <input class="qt-qty" type="number" min="0" step="any" aria-label="Quantity" title="Quantity">
-            <button class="qt-buy" data-qt="buy" title="Buy at the market"><small>Buy</small><b class="qt-px">—</b></button>
+            <button class="qt-buy" data-qt="buy" title="One click: buy this quantity at the market now"><small>Buy</small><b class="qt-px">—</b></button>
           </div>
         </div>
         <div class="lg-ohlc"></div>
@@ -254,9 +286,10 @@ export class ChartView {
     this.loadingOlder = false;
     this.lastCrosshair = null;
     this.live = new Map();      // indicator id -> entry
-    this.benchmarkFeeds = new BenchmarkFeedCache(createFeed, (sym) => this.refreshBenchmarkScripts(sym));
-    this.benchmarkTfId = this.state.tf;
     this.compareEntries = new Map();
+    this.scriptBenchmarks = new ScriptBenchmarks(this, createFeed);
+    this.pendingViewportFrame = null;
+    this.needsViewportReset = false;
     this.alertList = [];
     this.alertLines = []; this.extLine = null;
     this.constCache = new Map();
@@ -268,8 +301,6 @@ export class ChartView {
     this.lastFlush = 0;
     this.lastTickAt = 0;
     this.destroyed = false;
-    this.pendingViewportFrame = null;
-    this.needsViewportReset = false;
     this.replay = null;          // { all, idx, clock, playing, speed, timer } while replaying
     this.replayPick = false;     // choosing the replay's first candle
     this.paperLines = new Map(); // id -> { spec, line } (paper-trading positions, stops, orders)
@@ -438,8 +469,6 @@ export class ChartView {
 
     this.resizeObserver = new ResizeObserver(() => {
       this.positionPaneLegends();
-      // A symbol may finish loading while this chart cell is hidden or zero-width.
-      // Wait for its first measurable size before applying the live-edge view.
       if (this.needsViewportReset && this.bars.length && this.chart.timeScale().width() > 0) {
         this.needsViewportReset = false;
         focusLatestBars(this.chart.timeScale());
@@ -664,7 +693,7 @@ export class ChartView {
   // --- built-in indicators ---------------------------------------------------------
   addBuiltinEntry(inst) {
     const def = INDICATORS[inst.type];
-    inst.params = { ...defaultParams(inst.type), ...inst.params };
+    inst.params = coerceParams(inst.params, def.params); // defaults for missing ones, each as its declared type
     const entry = { inst, def, series: [], out: null };
     this.createEntrySeries(entry);
     this.live.set(inst.id, entry);
@@ -702,36 +731,6 @@ export class ChartView {
     this.hooks.onChange?.(this);
   }
 
-  // Hidden benchmark feeds are independent of visible chart comparisons.
-  getComparedCloses() {
-    const result = {};
-    const tz = this.meta.tzOffset || 0;
-    for (const [symbol, entry] of this.compareEntries) {
-      result[symbol] = alignBenchmarkCloses(this.bars, entry.bars || [], tz, entry.tz || 0);
-    }
-    for (const [symbol] of this.benchmarkFeeds.entries) {
-      const entry = this.benchmarkFeeds.get(symbol, this.state.tf);
-      if (entry) result[symbol] = alignBenchmarkCloses(this.bars, entry.bars, tz, entry.tz);
-    }
-    // Comparing a symbol to itself does not require a second data request.
-    result[this.state.symbol] = this.bars.map((bar) => bar.close);
-    return result;
-  }
-
-  refreshBenchmarkScripts(symbol) {
-    for (const entry of this.live.values()) {
-      if (entry.script && entry.benchmarkSymbols?.includes(symbol)) this.runScript(entry);
-    }
-  }
-
-  pruneScriptBenchmarks() {
-    const requested = new Set();
-    for (const entry of this.live.values()) {
-      if (entry.script) for (const symbol of entry.benchmarkSymbols || []) requested.add(symbol);
-    }
-    this.benchmarkFeeds.prune(requested);
-  }
-
   /** Runs a script indicator in the worker; repeated calls while it runs are coalesced. */
   runScript(entry, now = false) {
     if (!this.bars.length || this.destroyed) return;
@@ -743,8 +742,12 @@ export class ChartView {
       return;
     }
     const script = scriptStore.get(entry.inst.scriptId);
-    if (!script) {
-      entry.error = 'This script was deleted. Remove it from the chart.';
+    // A community script installed earlier on the static website must not run there: without the
+    // app's server, its worker has no CSP to cut it off from the internet (see community.js).
+    const blocked = script?.community && !canRunCommunity();
+    if (!script || blocked) {
+      entry.error = blocked ? 'Community scripts run only in the desktop app, where they are cut off from the internet.'
+        : 'This script was deleted. Remove it from the chart.';
       this.removeEntrySeries(entry);
       entry.sig = null;
       this.buildLegend();
@@ -756,8 +759,8 @@ export class ChartView {
     const runGen = this.loadGen;
     engine().run(script.code, this.bars, entry.inst.params, {
       tfSec: this.tf.sec, symbol: this.state.symbol, strategy: entry.inst.strategy,
-      compareCloses: this.getComparedCloses()
-    })
+      compareCloses: this.scriptBenchmarks.closes(),
+    }, entry.inst.scriptId)
       .then((res) => {
         if (this.destroyed || this.live.get(entry.inst.id) !== entry) return;
         if (runGen !== this.loadGen) { entry.again = true; return; }
@@ -780,20 +783,15 @@ export class ChartView {
   }
 
   applyScriptResult(entry, res, times, forceLegend) {
+    this.scriptBenchmarks.update(entry, res.benchmarks);
+    const dashboardChanged = entryDashboardChanged(entry, res.meta.dashboard);
     const def = scriptDef(res);
-    entry.benchmarkSymbols = res.benchmarks || [];
-    for (const symbol of entry.benchmarkSymbols) {
-      if (symbol !== this.state.symbol) this.benchmarkFeeds.ensure(symbol, this.tf, this.state.tf);
-    }
-    this.pruneScriptBenchmarks();
-    const previousDashboard = JSON.stringify(entry.dashboard || null);
-    entry.dashboard = res.meta.dashboard || null;
-    const dashboardChanged = previousDashboard !== JSON.stringify(entry.dashboard);
-    // Fill in default input values the first time (so settings show them).
-    let changedParams = false;
-    for (const p of def.params) {
-      if (entry.inst.params[p.key] === undefined) { entry.inst.params[p.key] = p.def; changedParams = true; }
-    }
+    // Settings as the script now declares them: defaults for new inputs (so settings show them), and a
+    // value saved for an input of another type (text last run, a number now…) is replaced, never reused.
+    const params = coerceParams(entry.inst.params, def.params);
+    const old = entry.inst.params || {};
+    const changedParams = Object.keys(old).length !== def.params.length || def.params.some((p) => !Object.is(old[p.key], params[p.key]));
+    entry.inst.params = params;
     const sig = JSON.stringify([def.overlay, def.plots.map((p) => [p.key, p.type, p.width, p.legend]), def.levels, def.fills.map((f) => [f.from, f.to])]);
     const structural = sig !== entry.sig;
     if (structural) {
@@ -819,7 +817,9 @@ export class ChartView {
         entry.markersApi = LWC.createSeriesMarkers(target, []);
         entry.markersTarget = target;
       }
-      entry.markersApi.setMarkers(res.markers.map((m) => ({ time: times[m.i], position: m.position, shape: m.shape, color: m.color, text: m.text })));
+      // In bar order (script-sanitize.js sorts them) and never past the bars this run had.
+      entry.markersApi.setMarkers(res.markers.filter((m) => times[m.i] != null)
+        .map((m) => ({ time: times[m.i], position: m.position, shape: m.shape, color: m.color, text: m.text })));
     } else if (entry.markersApi) {
       entry.markersApi.setMarkers([]);
     }
@@ -849,7 +849,7 @@ export class ChartView {
       if (m.kind === 'entry') {
         return { time: times[m.i], position: long ? 'belowBar' : 'aboveBar', shape: long ? 'arrowUp' : 'arrowDown', color: long ? '#4FA3F7' : '#EC5246', text: m.id };
       }
-      return { time: times[m.i], position: long ? 'aboveBar' : 'belowBar', shape: long ? 'arrowDown' : 'arrowUp', color: '#E040FB', text: SHORT[m.reason] || m.reason };
+      return { time: times[m.i], position: long ? 'aboveBar' : 'belowBar', shape: long ? 'arrowDown' : 'arrowUp', color: '#E040FB', text: (Object.hasOwn(SHORT, m.reason) && SHORT[m.reason]) || m.reason };
     });
     markers.sort((a, b) => a.time - b.time);
     entry.tradeMarkers.setMarkers(markers);
@@ -916,11 +916,13 @@ export class ChartView {
     this.hooks.onSymbol?.(this, full);
   }
 
+  /** Any timeframe: '45m', '4h', or typed forms such as '45', '240', 'D' (see timeframes.js). */
   setTimeframe(tf) {
-    if (tf === this.state.tf) return;
-    this.state.tf = tf;
+    const id = tfIdOf(tf);
+    if (!id || id === this.state.tf) return;
+    this.state.tf = id;
     this.load();
-    this.hooks.onTimeframe?.(this, tf);
+    this.hooks.onTimeframe?.(this, id);
   }
 
   setChartType(type) {
@@ -957,7 +959,7 @@ export class ChartView {
     if (!entry) return;
     this.removeIndicatorSeries(entry);
     this.state.indicators = this.state.indicators.filter((i) => i.id !== id);
-    this.pruneScriptBenchmarks();
+    this.scriptBenchmarks.prune();
     if (settings.view === this) closeSettings();
     this.buildLegend();
     this.hooks.onChange?.(this);
@@ -1069,14 +1071,18 @@ export class ChartView {
     this.feed?.close();
     this.feed = null;
     for (const e of this.compareEntries.values()) e.feed?.close();
-    this.benchmarkFeeds.clear();
+    this.scriptBenchmarks.close();
     if (this.pendingViewportFrame !== null) cancelAnimationFrame(this.pendingViewportFrame);
     for (const e of this.live.values()) clearTimeout(e.timer);
     clearTimeout(this.flushTimer);
     this.resizeObserver.disconnect();
     if (settings.view === this) closeSettings();
-    this.chart.remove();
+    // A live chart usually has a redraw queued for the next frame, and disposing it under that
+    // redraw throws "Object is disposed" (seen when going from 8 charts to 1). Detach it now and
+    // dispose it two frames later, after any queued redraw has run.
     this.el.remove();
+    const chart = this.chart;
+    requestAnimationFrame(() => requestAnimationFrame(() => { try { chart.remove(); } catch { /* already gone */ } }));
   }
 
   // --- compare symbols -----------------------------------------------------------------
@@ -1174,10 +1180,7 @@ export class ChartView {
 
   async load() {
     const gen = ++this.loadGen;
-    if (this.benchmarkTfId !== this.state.tf) {
-      this.benchmarkFeeds.clear();
-      this.benchmarkTfId = this.state.tf;
-    }
+    this.scriptBenchmarks.resetTimeframe();
     this.pauseReplay();
     this.feed?.close();
     this.feed = null;
@@ -1315,16 +1318,10 @@ export class ChartView {
     for (const s of series) {
       try { s.priceScale().applyOptions({ autoScale: true }); } catch { /* series without a scale */ }
     }
-
-    // setVisibleLogicalRange() uses logical indices which may still reflect the
-    // previous symbol or a chart width that has not settled yet. Anchor to the
-    // actual right edge of the new data, regardless of how many candles exist.
+    // Bar-array indices may not match the time scale immediately after switching symbols.
     const scale = this.chart.timeScale();
     focusLatestBars(scale);
     this.needsViewportReset = scale.width() <= 0;
-
-    // An auto-sized chart may lay out after data is assigned. Reconfirm the
-    // latest-bar position on the next frame, but never during a later load.
     if (this.pendingViewportFrame !== null) cancelAnimationFrame(this.pendingViewportFrame);
     const gen = this.loadGen;
     this.pendingViewportFrame = requestAnimationFrame(() => {
@@ -1341,6 +1338,10 @@ export class ChartView {
   /** Start time of the bar that a tick at chart time t belongs to, given the last bar's start. */
   bucketFor(t, lastTime) {
     const tf = this.tf;
+    // Crypto feeds know their bar grid (it restarts each day at 00:00 UTC, like the exchange's);
+    // stock feeds start a new session's first bar at its open.
+    const own = this.feed?.bucketOf?.(t, lastTime);
+    if (own != null) return own;
     if (tf.id === '1D') return Math.floor(t / DAY) * DAY;
     if (tf.id === '1M') {
       const d = new Date(t * 1000), l = new Date(lastTime * 1000);
@@ -1791,18 +1792,12 @@ export class ChartView {
       e.row = row;
     }
     for (const entry of this.live.values()) {
-      const panel = entry.dashboard;
-      const dashboardHtml = panel ? `<span class="indicator-dashboard">
-        <span class="indicator-status" data-tone="${panel.tone}">${esc(panel.status)}</span>
-        ${panel.metrics.map((m) => `<span class="indicator-metric" data-tone="${m.tone}">
-          <small>${esc(m.label)}</small><b>${esc(m.value)}</b>
-        </span>`).join('')}
-      </span>` : '';
+      const customPanel = dashboardHtml(entry.dashboard, esc);
       const row = document.createElement('div');
       row.className = 'lg-row';
       row.dataset.id = entry.inst.id;
       row.innerHTML = `<span class="lg-name">${esc(this.entryLabel(entry))}</span>
-        ${dashboardHtml}<span class="lg-vals">${entry.error ? `<span class="lg-err">⚠ ${esc(entry.error)}</span>` : ''}</span>
+        ${customPanel}<span class="lg-vals">${entry.error ? `<span class="lg-err">⚠ ${esc(entry.error)}</span>` : ''}</span>
         <span class="lg-actions">
           ${entry.script ? `<button data-act="code" title="Edit script" aria-label="Edit script">${ICON_CODE}</button>` : ''}
           <button data-act="settings" title="Settings" aria-label="Settings">${ICON_GEAR}</button>
@@ -1897,21 +1892,23 @@ export class ChartView {
     const { inst, def } = entry;
     const el = settings.el;
     const colorPlots = def.plots.filter((p) => !p.colorFn && !p.colorsArr);
+    // Every value is escaped: settings come from saved state and from scripts (see coerceParams).
     const field = (p) => {
       const v = inst.params[p.key] ?? p.def;
+      const key = esc(p.key);
       if (p.type === 'select') {
-        return `<select data-param="${p.key}">${p.options.map((o) => `<option${o === v ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+        return `<select data-param="${key}">${(p.options || []).map((o) => `<option${o === v ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
       }
-      if (p.type === 'bool') return `<input type="checkbox" data-param="${p.key}"${v ? ' checked' : ''}>`;
-      if (p.type === 'text') return `<input type="text" data-param="${p.key}" value="${esc(v)}">`;
-      return `<input type="number" data-param="${p.key}" value="${v}" min="${p.min}" max="${p.max}" step="${p.step}">`;
+      if (p.type === 'bool') return `<input type="checkbox" data-param="${key}"${v ? ' checked' : ''}>`;
+      if (p.type === 'text') return `<input type="text" data-param="${key}" value="${esc(v)}">`;
+      return `<input type="number" data-param="${key}" value="${esc(v)}" min="${esc(p.min)}" max="${esc(p.max)}" step="${esc(p.step)}">`;
     };
     el.innerHTML = `
       <div class="pop-title">${esc(def.name)}</div>
       ${def.params.map((p) => `<label class="pop-field"><span>${esc(p.label)}</span>${field(p)}</label>`).join('')}
       ${colorPlots.map((p) => `
         <label class="pop-field"><span>${esc(p.title)} color</span>
-          <input type="color" data-color="${p.key}" value="${/^#[0-9a-f]{6}$/i.test(plotColor(inst, p)) ? plotColor(inst, p) : '#4FA3F7'}">
+          <input type="color" data-color="${esc(p.key)}" value="${/^#[0-9a-f]{6}$/i.test(plotColor(inst, p)) ? plotColor(inst, p) : '#4FA3F7'}">
         </label>`).join('')}
       ${!def.params.length && !colorPlots.length ? '<p class="pop-note">No settings for this indicator.</p>' : ''}
       <div class="pop-actions">
@@ -1934,7 +1931,7 @@ export class ChartView {
       if (!spec) return;
       let v;
       if (spec.type === 'bool') v = t.checked;
-      else if (spec.type === 'select' || spec.type === 'text') v = t.value;
+      else if (spec.type === 'select' || spec.type === 'text') v = t.value.slice(0, LIMITS.text);
       else {
         v = Number(t.value);
         if (t.value === '' || !Number.isFinite(v) || v < spec.min || v > spec.max) return;

@@ -14,5 +14,5 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - run: node --check public/js/chart-view.js && node --check public/js/script-worker.js && node --check public/js/scripts.js && node --check public/js/viewport.js && node --check public/js/benchmark-data.js
+      - run: node --check public/js/chart-view.js && node --check public/js/script-worker.js && node --check public/js/scripts.js && node --check public/js/viewport.js && node --check public/js/benchmark-data.js && node --check public/js/indicator-extensions.js && node --check public/js/indicator-dashboard.js && node --check public/js/script-sanitize.js
       - run: npm test

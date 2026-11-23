@@ -8,7 +8,8 @@ import path from 'node:path';
 import { rmSync } from 'node:fs';
 import { startServer } from '../server.mjs';
 
-const profile = path.join(os.tmpdir(), 'wickline-e2e-profile');
+// One profile per run, so two runs at once don't share (or wipe) each other's storage.
+const profile = path.join(os.tmpdir(), `wickline-e2e-profile-${process.pid}`);
 rmSync(profile, { recursive: true, force: true });
 app.setPath('userData', profile);
 
@@ -131,7 +132,82 @@ app.whenReady().then(async () => {
     check('a new symbol opens with its prices in view', view.auto && view.last <= view.top && view.last >= Math.min(view.bot, view.top) - Math.abs(view.top) * 0.5,
       `last ${view.last} scale ${Math.round(view.bot)}..${Math.round(view.top)}`);
 
-    // 5b. Repeatedly switch between long-history stocks in the SAME chart cell.
+    // 5b. Any timeframe (like TradingView): built from each source's own intervals, live too; the
+    //     ▾ menu with stars; typing a number opens "Change interval".
+    // Bar spacing, and bars off their day's grid (midnight UTC for crypto, the day's first bar for stocks).
+    const tfBars = (sec) => run(`(() => { const v = window.__wickline.views()[0]; const b = v.bars;
+      const gaps = {}; for (let i = 1; i < b.length; i++) { const g = b[i].time - b[i - 1].time; gaps[g] = (gaps[g] || 0) + 1; }
+      const first = {}; for (const x of b) { const d = Math.floor(x.time / 86400); if (!(d in first)) first[d] = x.time; }
+      return { n: b.length, common: +Object.entries(gaps).sort((x, y) => y[1] - x[1])[0]?.[0], tf: v.state.tf, status: v.status,
+        offGrid: b.filter((x) => (x.time - first[Math.floor(x.time / 86400)]) % ${sec}).length, legend: v.q('.lg-meta').textContent }; })()`);
+    const waitTf = async (tf) => {
+      for (let i = 0; i < 40; i++) {
+        await wait(400);
+        if (await run(`(() => { const v = window.__wickline.views()[0]; return v.state.tf === '${tf}' && !!v.feed && v.bars.length > 0 && v.q('.overlay.loading').hidden; })()`)) return;
+      }
+    };
+    await open('BINANCE:BTCUSDT', '10m');
+    const b10 = await tfBars(600);
+    check('Binance 10m (from 5m klines): 10-minute bars on the exchange\'s grid', b10.n >= 900 && b10.common === 600 && b10.offGrid === 0 && /^10m/.test(b10.legend), JSON.stringify(b10));
+    check('...shown as the active timeframe though it isn\'t a favourite', await run(`!!document.querySelector('#tf-group .tf-extra.on[data-tf="10m"]')`));
+    const live10 = await run(`(async () => { const v = window.__wickline.views()[0]; const tz = v.meta.tzOffset || 0; const start = v.bars.at(-1).time - tz;
+      const k = await (await fetch('https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=2&startTime=' + start * 1000)).json();
+      await new Promise((r) => setTimeout(r, 3000));
+      const b = v.bars.find((x) => x.time - tz === start);
+      return { status: v.status, open: b.open, high: b.high, low: b.low, rest: { open: +k[0][1], high: Math.max(...k.map((x) => +x[2])), low: Math.min(...k.map((x) => +x[3])) } }; })()`);
+    check('...its newest candle is built live from the 5m klines', live10.status === 'live' && live10.open === live10.rest.open
+      && live10.high >= live10.rest.high && live10.low <= live10.rest.low, JSON.stringify(live10));
+    await open('YAHOO:AAPL', '2m');
+    const y2 = await tfBars(120);
+    check('a Yahoo stock on 2m: 2-minute bars', y2.n > 1000 && y2.common === 120 && y2.offGrid <= 1 && /^2m/.test(y2.legend), JSON.stringify(y2));
+    await open('YAHOO:AAPL', '90m');
+    const y90 = await tfBars(5400);
+    check('...and on 90m: 90-minute bars from each session\'s start', y90.n > 100 && y90.common === 5400 && y90.offGrid <= 1 && /^90m/.test(y90.legend), JSON.stringify(y90));
+    // Typing on the chart: real key presses.
+    await open('BINANCE:BTCUSDT', '1h');
+    const key = (k) => { for (const type of ['keyDown', 'char', 'keyUp']) win.webContents.sendInputEvent({ type, keyCode: k }); };
+    key('4'); await wait(100); key('5'); await wait(300);
+    const ivl = await run(`({ open: !document.querySelector('.ivl-box').hidden, text: document.querySelector('.ivl-input').value,
+      meaning: document.querySelector('.ivl-meaning').innerText.replace(/\\s+/g, ' '), search: document.querySelector('#search-modal').hidden })`);
+    check('typing 45 on the chart opens "Change interval" and says what it means', ivl.open && ivl.text === '45' && /45 minutes/.test(ivl.meaning) && ivl.search, JSON.stringify(ivl));
+    key('Enter');
+    await waitTf('45m');
+    const b45 = await tfBars(2700);
+    check('...Enter switches the active chart to 45m', b45.tf === '45m' && b45.common === 2700 && b45.offGrid === 0 && (await run(`document.querySelector('.ivl-box').hidden`)), JSON.stringify(b45));
+    check('...and the header shows it as active', await run(`!!document.querySelector('#tf-group .tf.on[data-tf="45m"]')`));
+    key('7');
+    await wait(200);
+    await run(`(() => { const i = document.querySelector('.ivl-input'); i.value = '7203.T'; i.dispatchEvent(new Event('input')); })()`);
+    const digitTicker = await run(`({ meaning: document.querySelector('.ivl-meaning').innerText, row: document.querySelector('.ivl-search').innerText.replace(/\\s+/g, ' ') })`);
+    key('Enter');
+    await wait(400);
+    const sr = await run(`({ open: !document.querySelector('#search-modal').hidden, q: document.querySelector('#search-input').value, tf: window.__wickline.views()[0].state.tf })`);
+    check('a ticker starting with a digit (7203.T) goes on to symbol search', /Not a timeframe/.test(digitTicker.meaning) && /Search symbols for .7203\.T/.test(digitTicker.row)
+      && sr.open && sr.q === '7203.T' && sr.tf === '45m', JSON.stringify({ ...digitTicker, ...sr }));
+    await run(`document.querySelector('#search-modal .close').click()`);
+    // The ▾ menu: groups, a star adds a header button, a row switches the chart.
+    await run(`document.querySelector('#tf-group [data-tf-menu]').click()`);
+    await wait(200);
+    const tfMenu = await run(`({ open: !document.querySelector('#tf-menu').hidden, groups: [...document.querySelectorAll('#tf-menu .menu-title')].map((e) => e.textContent).join(),
+      rows: document.querySelectorAll('#tf-menu [data-pick]').length, on: document.querySelector('#tf-menu .tf-row.on')?.dataset.pick })`);
+    check('the ▾ menu lists minutes, hours and days', tfMenu.open && tfMenu.groups.startsWith('Minutes,Hours,Days') && tfMenu.rows >= 18 && tfMenu.on === '45m', JSON.stringify(tfMenu));
+    await run(`document.querySelector('#tf-menu [data-star="3h"]').click()`);
+    await wait(200);
+    check('...its star adds a timeframe to the header', await run(`!!document.querySelector('#tf-group [data-tf="3h"]') && document.querySelector('#tf-menu [data-star="3h"]').classList.contains('on')
+      && !document.querySelector('#tf-menu').hidden && JSON.parse(localStorage.getItem('wickline.tfFavorites')).includes('3h')`));
+    await run(`document.querySelector('#tf-menu [data-pick="2m"]').click()`);
+    await waitTf('2m');
+    check('...and a row switches the chart', (await run(`window.__wickline.views()[0].state.tf`)) === '2m' && (await run(`document.querySelector('#tf-menu').hidden`)));
+    const tfFit = await run(`(async () => { const t = document.querySelector('.topbar'); const bad = [];
+      for (const w of [1280, 1366]) { t.style.width = w + 'px'; let fit = false;
+        for (let k = 0; k < 20 && !fit; k++) { await new Promise((r) => setTimeout(r, 100)); fit = t.scrollWidth <= t.clientWidth; }
+        if (!fit) bad.push(w); }
+      t.style.width = ''; return bad; })()`);
+    check('...the header still fits with an extra favourite and a non-favourite timeframe', tfFit.length === 0, tfFit.join(', '));
+    await run(`localStorage.removeItem('wickline.tfFavorites')`);
+    await open('BINANCE:BTCUSDT', '1h'); // as section 5 left it
+
+    // 5c. Repeatedly switch between long-history stocks in the SAME chart cell.
     // The actual newest candle must be visible near the right edge, irrespective of
     // the prior ticker's history length or the previous zoom/scroll position.
     await open('YAHOO:AAPL', '1D');
@@ -217,6 +293,90 @@ app.whenReady().then(async () => {
     check('with sync off, only the active chart changes', sOff.filter((s) => s === 'YAHOO:AAPL').length === 1 && tOff.filter((t) => t === '1D').length === 1,
       `${sOff.join(', ')} | ${tOff.join(', ')}`);
     pop.destroy();
+
+    // 8b. 8 charts, and resizing the panes by dragging the dividers between them.
+    const loaded = () => run(`[...document.querySelectorAll('#charts > .cell .lg-ohlc')].filter((e) => /\\d/.test(e.innerText)).length`);
+    await run(`document.querySelector('#layout-btn').click(); document.querySelector('#layout-menu [data-layout="8"]').click()`);
+    for (let i = 0; i < 50 && (await loaded()) < 8; i++) await wait(500);
+    const cells8 = await run(`document.querySelectorAll('#charts > .cell').length`);
+    check('8-chart layout shows 8 charts with data', cells8 === 8 && (await loaded()) === 8, `${await loaded()} of ${cells8} loaded`);
+    await run(`document.querySelectorAll('#charts > .cell')[6].dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`);
+    const act8 = await run(`[...document.querySelectorAll('#charts > .cell')].map((c) => c.classList.contains('active'))`);
+    check('...clicking one makes it the only active chart', act8.filter(Boolean).length === 1 && act8[6], act8.join(','));
+    const rects = () => run(`[...document.querySelectorAll('#charts > .cell')].map((c) => { const r = c.getBoundingClientRect();
+      return { w: Math.round(r.width), h: Math.round(r.height) }; })`);
+    // Synthesised pointer events on a divider ('0.0' splits the rows, '1.0' is the first one in the top row).
+    const drag = (id, dx, dy) => run(`(() => { const s = document.querySelector('#charts .split[data-split="${id}"]'); const r = s.getBoundingClientRect();
+      const x = r.left + r.width / 2, y = r.top + r.height / 2;
+      const ev = (type, k) => s.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, isPrimary: true, pointerType: 'mouse',
+        button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: x + ${dx} * k, clientY: y + ${dy} * k }));
+      ev('pointerdown', 0); for (let k = 1; k <= 10; k++) ev('pointermove', k / 10); ev('pointerup', 1); })()`);
+    const near = (a, b) => Math.abs(a - b) <= 3;
+    const same = (a, b) => a.length === b.length && a.every((r, i) => near(r.w, b[i].w) && near(r.h, b[i].h));
+    const eq8 = await rects();
+    const plotW = () => run(`window.__wickline.views().map((v) => v.chart.timeScale().width())`);
+    const plot0 = await plotW();
+    check('the dividers show which way they resize', await run(`(() => { const c = (a) => getComputedStyle(document.querySelector('#charts .split[data-axis="' + a + '"]')).cursor;
+      return document.querySelectorAll('#charts .split').length === 7 && c('x') === 'col-resize' && c('y') === 'row-resize'; })()`));
+    await drag('1.0', 80, 0);
+    await drag('0.0', 0, 90);
+    await wait(600);
+    const moved8 = await rects();
+    check('dragging a divider resizes the panes on either side', near(moved8[0].w, eq8[0].w + 80) && near(moved8[1].w, eq8[1].w - 80) && near(moved8[2].w, eq8[2].w) && near(moved8[4].w, eq8[4].w),
+      `${eq8.slice(0, 5).map((r) => r.w).join(',')} -> ${moved8.slice(0, 5).map((r) => r.w).join(',')}`);
+    check('...and a row divider resizes the rows', near(moved8[0].h, eq8[0].h + 90) && near(moved8[7].h, eq8[7].h - 90), `${eq8[0].h},${eq8[7].h} -> ${moved8[0].h},${moved8[7].h}`);
+    // Charts resize on the next frame after their pane does; give a busy machine up to 3 s.
+    let plot1 = await plotW();
+    for (let k = 0; k < 15 && !(plot1[0] > plot0[0] + 50 && plot1[1] < plot0[1] - 50); k++) { await wait(200); plot1 = await plotW(); }
+    check('...and the charts redraw at their new size', plot1[0] > plot0[0] + 50 && plot1[1] < plot0[1] - 50, `${plot0.slice(0, 2)} -> ${plot1.slice(0, 2)}`);
+    await drag('1.0', -2000, 0);
+    const min8 = await rects();
+    check('a pane stops at its minimum size', min8[0].w >= 155 && min8[0].w <= 170, `${min8[0].w}px`);
+    await drag('1.0', eq8[0].w + 80 - min8[0].w, 0);
+    const savedSizes = await run(`localStorage.getItem('wickline.layoutSizes')`);
+    const beforeReload = await rects();
+    await win.loadURL(`http://127.0.0.1:${port}/?e2e&page=${++page}`);
+    for (let i = 0; i < 20; i++) { await wait(500); if ((await run(`document.querySelectorAll('#charts > .cell').length`)) === 8) break; }
+    await wait(800);
+    const reloaded = await rects();
+    check('pane sizes are kept after a restart', !!savedSizes && near(beforeReload[0].w, eq8[0].w + 80) && same(reloaded, beforeReload),
+      `${beforeReload.slice(0, 2).map((r) => `${r.w}×${r.h}`)} -> ${reloaded.slice(0, 2).map((r) => `${r.w}×${r.h}`)}`);
+    const dbl = (id) => run(`document.querySelector('#charts .split[data-split="${id}"]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+    await dbl('1.0');
+    await wait(300);
+    const reset1 = await rects();
+    check('double-clicking a divider makes that split equal again', reset1.slice(0, 4).every((r, i) => near(r.w, eq8[i].w)) && near(reset1[0].h, reloaded[0].h),
+      reset1.slice(0, 4).map((r) => r.w).join(','));
+    await dbl('0.0');
+    await wait(300);
+    check('...and the rows too', same(await rects(), eq8), (await rects()).slice(0, 5).map((r) => `${r.w}×${r.h}`).join(' '));
+    await run(`document.querySelectorAll('#charts > .cell')[5].querySelector('[data-cell="max"]').click()`);
+    await wait(300);
+    const shown = () => run(`(() => { const c = document.querySelector('#charts'), b = c.getBoundingClientRect(), m = c.querySelectorAll('.cell')[5].getBoundingClientRect();
+      return { cells: [...c.querySelectorAll('.cell')].filter((x) => x.offsetParent).length, splits: [...c.querySelectorAll('.split')].filter((x) => x.offsetParent).length,
+        full: Math.abs(m.width - b.width) < 2 && Math.abs(m.height - b.height) < 2 }; })()`);
+    const mx = await shown();
+    check('maximizing one of 8 charts fills the chart area, without dividers', mx.cells === 1 && mx.splits === 0 && mx.full, JSON.stringify(mx));
+    await run(`document.querySelectorAll('#charts > .cell')[5].querySelector('[data-cell="max"]').click()`);
+    await wait(300);
+    const rs = await shown();
+    check('...and restoring brings back all 8 and their dividers', rs.cells === 8 && rs.splits === 7, JSON.stringify(rs));
+    // Going from 8 live charts to 1 disposes 7 of them mid-redraw; none may throw ("Object is disposed").
+    const errorsBefore1 = errors.length;
+    await run(`document.querySelector('#layout-btn').click(); document.querySelector('#layout-menu [data-layout="1"]').click()`);
+    await wait(1200);
+    await run(`document.querySelector('#layout-btn').click(); document.querySelector('#layout-menu [data-layout="8"]').click()`);
+    for (let i = 0; i < 20; i++) { await wait(500); if ((await run(`document.querySelectorAll('#charts > .cell').length`)) === 8) break; }
+    await wait(800);
+    check('going from 8 charts to 1 and back throws no errors', errors.length === errorsBefore1, errors.slice(errorsBefore1, errorsBefore1 + 2).join(' | '));
+    await run(`document.querySelector('#ed-btn').click()`);
+    await wait(500);
+    const ed = await run(`(() => { const c = document.querySelector('#charts').getBoundingClientRect(), e = document.querySelector('#editor').getBoundingClientRect();
+      const cells = [...document.querySelectorAll('#charts > .cell')].map((x) => x.getBoundingClientRect());
+      return { open: e.height > 100, inside: cells.every((r) => r.top >= c.top - 1 && r.bottom <= c.bottom + 1 && r.bottom <= e.top + 1), half: Math.abs(cells[4].top - c.top - c.height / 2) < 3 }; })()`);
+    check('a panel at the bottom shrinks all 8 panes', ed.open && ed.inside && ed.half, JSON.stringify(ed));
+    await run(`document.querySelector('#ed-btn').click()`);
+    await wait(300);
 
     // 9. Screener: scans US stocks, ideas sort and filter, a row opens its chart.
     await run(`document.querySelector('#layout-btn').click(); document.querySelector('[data-layout="1"]').click()`);
@@ -348,20 +508,168 @@ app.whenReady().then(async () => {
     const zoom = await run(`({ crumb: document.querySelector('.hm-crumb').innerText, tiles: document.querySelectorAll('.hm-tile').length })`);
     check('clicking a sector zooms in on it', /All sectors/.test(zoom.crumb) && zoom.tiles < hm.tiles, JSON.stringify(zoom));
     const hmSym = await run(`(() => { const t = document.querySelector('.hm-tile'); t.click(); return t.dataset.sym; })()`);
-    await wait(3000);
-    const hmChart = await run(`document.querySelector('.cell.active .lg-title, .cell .lg-title').innerText`);
+    // A cold daily history can take Yahoo several seconds; wait for the chart's title (up to 12 s).
+    let hmChart = '';
+    for (let i = 0; i < 40 && !hmChart.startsWith(`${hmSym} `); i++) {
+      await wait(300);
+      hmChart = await run(`document.querySelector('.cell.active .lg-title, .cell .lg-title').innerText`);
+    }
     check('clicking a tile opens its chart', hmChart.startsWith(`${hmSym} `), `${hmSym} -> ${hmChart.split('\n')[0]}`);
-    await run(`document.querySelector('.hm-crumb [data-hm-sector=""]')?.click(); document.querySelector('#hm-close').click()`);
+    // ...other markets from the menu: crypto (without stablecoins) and stock markets outside the US.
+    const hmMarket = async (id, min) => {
+      await run(`(() => { const s = document.querySelector('#hm-tools [data-f="market"]'); s.value = '${id}'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+      for (let i = 0; i < 80; i++) { await wait(500); if (await run(`document.querySelectorAll('.hm-tile').length >= ${min} || !!document.querySelector('#hm-body [data-hm-retry]')`)) break; }
+      return run(`({ tiles: document.querySelectorAll('.hm-tile').length, groups: document.querySelectorAll('.hm-sector').length,
+        colored: [...document.querySelectorAll('.hm-tile')].filter((t) => /rgb\\((?!46, 48, 56)/.test(t.style.background)).length,
+        syms: [...document.querySelectorAll('.hm-tile')].map((t) => t.dataset.sym),
+        legend: document.querySelector('.hm-updated')?.innerText || '',
+        off: [...document.querySelectorAll('#hm-tools [data-hm-period]:disabled')].map((b) => b.textContent),
+        error: document.querySelector('#hm-body .st-empty')?.innerText.replace(/\\s+/g, ' ').slice(0, 160) || null })`);
+    };
+    const short = (m) => JSON.stringify({ ...m, syms: m.syms.slice(0, 10) });
+    const cr = await hmMarket('crypto', 50);
+    const PEGGED = ['USDT', 'USDC', 'DAI', 'USDE', 'USDS', 'FDUSD', 'PYUSD', 'TUSD', 'USD1', 'RLUSD', 'WBTC', 'WETH', 'STETH', 'WSTETH', 'WEETH', 'XAUT', 'PAXG'];
+    check('Crypto: the top coins, coloured by their move, without stablecoins or wrapped copies',
+      cr.colored >= 50 && cr.syms.includes('BTC') && !cr.syms.some((s) => PEGGED.includes(s) || /USD/.test(s)), short(cr));
+    const coinFull = await run(`(() => { const t = document.querySelector('.hm-tile[data-sym="BTC"]') || document.querySelector('.hm-tile[data-full]'); t.click(); return t.dataset.full; })()`);
+    let coinChart = '';
+    for (let i = 0; i < 20; i++) {
+      await wait(500);
+      coinChart = await run(`(() => { const v = ${activeChart}; return v.state.symbol + ' | ' + v.el.querySelector('.lg-title').innerText.split('\\n')[0]; })()`);
+      if (coinChart.startsWith(`${coinFull} | ${coinFull.split(':')[1]}`)) break;
+    }
+    check('...clicking a coin opens its chart (Binance pair, else Yahoo)', /^(BINANCE|YAHOO):/.test(coinFull) && coinChart.startsWith(`${coinFull} | ${coinFull.split(':')[1]}`), `${coinFull} -> ${coinChart}`);
+    for (const [id, cur] of [['GB', 'GBP'], ['JP', 'JPY'], ['DE', 'EUR']]) {
+      const m = await hmMarket(id, 50);
+      check(`${id} stocks: tiles by sector, coloured, sized in ${cur}`, m.tiles >= 50 && m.groups >= 5 && m.colored > m.tiles * 0.8 && m.legend.includes(cur), short(m));
+    }
+    await hmMarket('us', 100);
+    await run(`document.querySelector('#hm-close').click()`);
+
+    // 13b. Options: a US ETF's chain from Yahoo (expiries, rows around the price, stats), a contract
+    // opens its own chart, Bitcoin's chain from Deribit, and a friendly message for forex.
+    await run(`(${activeChart}).setSymbol('YAHOO:SPY')`);
+    for (let i = 0; i < 30; i++) { await wait(500); if (await run(`(() => { const v = ${activeChart}; return v.state.symbol === 'YAHOO:SPY' && v.bars.length > 10; })()`)) break; }
+    await run(`document.querySelector('#op-btn').click()`);
+    for (let i = 0; i < 60; i++) { await wait(500); if (await run(`!!document.querySelector('.op-table tbody tr[data-i]') || !!document.querySelector('#op-body [data-op-retry], .op-none')`)) break; }
+    const opInfo = () => run(`(() => { const c = document.querySelector('.op-chain'), s = c?.querySelector('.op-spot'), sel = document.querySelector('#op-tools select');
+      return { symbol: document.querySelector('#op-symbol').textContent, src: document.querySelector('#op-src').innerText.trim(),
+        expiries: sel ? sel.options.length : 0, expiry: sel ? sel.value : null, rows: document.querySelectorAll('.op-table tbody tr[data-i]').length,
+        atmVisible: !!s && s.offsetTop >= c.scrollTop && s.offsetTop <= c.scrollTop + c.clientHeight,
+        kpis: [...document.querySelectorAll('.op-kpis .st-kpi')].map((k) => [k.querySelector('span').textContent, k.querySelector('b').textContent]),
+        chart: !!document.querySelector('.op-oi canvas'), unusual: document.querySelectorAll('.op-ua-row').length + document.querySelectorAll('.op-ua-list .op-note').length,
+        error: document.querySelector('#op-body .st-empty')?.innerText.replace(/\\s+/g, ' ').slice(0, 160) || null }; })()`);
+    const spy = await opInfo();
+    const kpi = (info, label) => (info.kpis.find(([l]) => l === label) || [])[1] || '';
+    const shortOp = (o) => JSON.stringify({ ...o, kpis: o.kpis.map(([l, v]) => `${l}: ${v}`).join(', ') }).slice(0, 400);
+    check('Options: SPY\'s chain from Yahoo, many expiries, centred on the price', spy.symbol === 'SPY' && spy.expiries >= 5 && spy.rows >= 20 && spy.atmVisible
+      && spy.src === 'Delayed ~15 min · Yahoo', shortOp(spy));
+    check('...with the price, ATM IV and expected move filled in', /^[\d,.]+$/.test(spy.kpis[0]?.[1] || '') && /^\d+(\.\d)?%$/.test(kpi(spy, 'ATM IV'))
+      && /^±[\d,.]+$/.test(kpi(spy, 'Expected move')) && /^±[\d,.]+$/.test(kpi(spy, '1σ move')) && spy.chart && spy.unusual > 0, shortOp(spy));
+    const firstExpiry = spy.expiry;
+    await run(`(() => { const s = document.querySelector('#op-tools select'); s.value = s.options[3].value; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    for (let i = 0; i < 30; i++) { await wait(500); if (await run(`document.querySelector('#op-tools select')?.selectedIndex === 3`)) break; }
+    const spy2 = await opInfo();
+    check('...another expiry loads its own chain', spy2.expiry !== firstExpiry && spy2.rows >= 20 && spy2.atmVisible, shortOp(spy2));
+    const contract = await run(`(() => { const td = document.querySelector('.op-spot').nextElementSibling.querySelector('td[data-side="c"]');
+      const k = td.closest('tr').querySelector('.op-k').textContent; setTimeout(() => td.click(), 0); return k; })()`);
+    let opChart = null;
+    for (let i = 0; i < 40; i++) {
+      await wait(500);
+      opChart = await run(`(() => { const v = ${activeChart}, err = v.el.querySelector('.overlay.error');
+        return { symbol: v.state.symbol, bars: v.bars.length, legend: v.el.querySelector('.lg-ohlc')?.innerText.replace(/\\s+/g, ' ').trim(),
+          error: err.hidden ? null : err.innerText.replace(/\\s+/g, ' ').slice(0, 120), panel: document.querySelector('#op-symbol').textContent }; })()`);
+      if (opChart.error || (opChart.bars > 0 && /\\d/.test(opChart.legend || ''))) break;
+    }
+    check('...clicking a contract opens its chart, and the panel stays on SPY', /^YAHOO:SPY\d{6}C\d{8}$/.test(opChart.symbol) && opChart.bars > 0 && !opChart.error
+      && /^O\S+ H\S+ L\S+ C\S+/.test(opChart.legend || '') && opChart.panel === 'SPY', `strike ${contract}: ${JSON.stringify(opChart)}`);
+    await run(`(${activeChart}).setSymbol('BINANCE:BTCUSDT')`);
+    for (let i = 0; i < 40; i++) { await wait(500); if (await run(`document.querySelector('#op-symbol').textContent === 'BTC' && (!!document.querySelector('.op-table tbody tr[data-i]') || !!document.querySelector('#op-body [data-op-retry]'))`)) break; }
+    const btcOp = await opInfo();
+    check('Options follow the chart: Bitcoin\'s chain from Deribit, in real time', btcOp.symbol === 'BTC' && btcOp.src === 'Real time · Deribit' && btcOp.expiries >= 3
+      && btcOp.rows >= 10 && btcOp.atmVisible && /^\d+(\.\d)?%$/.test(kpi(btcOp, 'ATM IV')) && /^[\d,]+$/.test(kpi(btcOp, 'Max pain')), shortOp(btcOp));
+    await run(`(${activeChart}).setSymbol('YAHOO:EURUSD=X')`);
+    for (let i = 0; i < 30; i++) { await wait(500); if (await run(`!!document.querySelector('.op-none')`)) break; }
+    const fxOp = await run(`document.querySelector('#op-body').innerText.replace(/\\s+/g, ' ').trim()`);
+    check('...and a forex pair says it has no options', /^No options for EURUSD=X/.test(fxOp), fxOp.slice(0, 120));
+    await run(`document.querySelector('#op-close').click()`);
+    await run(`(${activeChart}).setSymbol('BINANCE:BTCUSDT')`);
+    for (let i = 0; i < 20; i++) { await wait(500); if (await run(`(() => { const v = ${activeChart}; return v.state.symbol === 'BINANCE:BTCUSDT' && v.bars.length > 100; })()`)) break; }
+
+    // 14. Community scripts: the library lists published scripts, one click adds one to the chart,
+    // Publish opens GitHub's form with the script filled in, and scripts can't reach the network.
+    await run(`document.querySelector('#ind-btn').click()`);
+    await wait(300);
+    await run(`document.querySelector('[data-cat="Community"]').click()`);
+    for (let i = 0; i < 30; i++) { await wait(300); if (await run(`document.querySelectorAll('.cm-item').length > 0`)) break; }
+    const cm = await run(`({ items: document.querySelectorAll('.cm-item').length, strategies: document.querySelectorAll('.cm-kind.strategy').length })`);
+    check('the Community tab lists published scripts', cm.items >= 10 && cm.strategies >= 5, JSON.stringify(cm));
+    await run(`document.querySelector('[data-comm="wickline-supertrend-adx"]').click()`);
+    let added = null;
+    for (let i = 0; i < 30 && !added?.plots; i++) {
+      await wait(400);
+      added = await run(`(() => { for (const v of window.__wickline.views()) for (const e of v.live.values())
+        if (e.def?.name === 'Supertrend + ADX') return { error: e.error || null, plots: e.out ? Object.keys(e.out).length : 0, strategy: !!e.report };
+        return null; })()`);
+    }
+    check('one click adds a community strategy to the chart, and it runs', added && !added.error && added.plots > 0 && added.strategy, JSON.stringify(added));
+    check('...as a copy in My scripts', await run(`JSON.parse(localStorage.getItem('wickline.scripts') || '[]').some((s) => s.community?.id === 'wickline-supertrend-adx')`));
+    const testerList = await run(`(async () => { const w = (ms) => new Promise((r) => setTimeout(r, ms));
+      const wasHidden = document.querySelector('#tester').hidden;
+      if (wasHidden) document.querySelector('#st-btn').click();
+      await w(300);
+      const opts = [...document.querySelectorAll('#st-select option')].map((o) => o.textContent);
+      const summary = !!document.querySelector('#st-content .st-empty') ? 'empty' : 'results';
+      if (wasHidden) document.querySelector('#st-close').click();
+      return { opts, summary }; })()`);
+    check('...and the Strategy tester lists it with results', testerList.opts.includes('Supertrend + ADX') && testerList.summary === 'results', JSON.stringify(testerList));
+    const pub = await run(`(async () => { const w = (ms) => new Promise((r) => setTimeout(r, ms));
+      let opened = null; const orig = window.open; window.open = (u) => { opened = u; return null; };
+      document.querySelector('#ed-btn').click(); await w(300);
+      document.querySelector('#ed-publish').click(); await w(1500);
+      const shown = !document.querySelector('#publish-modal').hidden;
+      document.querySelector('#pub-desc').value = 'A script published by the end-to-end test.';
+      document.querySelector('#pub-license').checked = true;
+      document.querySelector('#publish-form').requestSubmit(); await w(300);
+      window.open = orig; document.querySelector('#ed-close').click();
+      const u = opened && new URL(opened);
+      return { shown, host: u?.host, template: u?.searchParams.get('template'), hasCode: /(indicator|strategy)\\(/.test(u?.searchParams.get('code') || '') }; })()`);
+    check('Publish opens GitHub\'s form with the script filled in', pub.shown && pub.host === 'github.com' && pub.template === 'publish-script.yml' && pub.hasCode, JSON.stringify(pub));
+    const net = await run(`(async () => { const { engine } = await import('/js/scripts.js');
+      const res = await engine().run("indicator('Net'); const g = (() => {}).constructor('return this')(); log([typeof g.fetch, typeof g.XMLHttpRequest, typeof g.WebSocket, typeof g.indexedDB, typeof g.importScripts].join(' ')); plot(close);",
+        window.__wickline.views()[0].bars);
+      return res.logs[0]; })()`);
+    check('scripts have no way to reach the network or the app\'s storage', net === 'undefined undefined undefined undefined undefined', net);
 
     check('the header fits without scrolling', await run(`(() => { const t = document.querySelector('.topbar'); return t.scrollWidth <= t.clientWidth; })()`));
     // ...at any width from small laptops up (labels hide a group at a time).
     const fits = await run(`(async () => { const t = document.querySelector('.topbar'); const bad = [];
       for (const w of [1280, 1366, 1500, 1600, 1720, 1800, 1950, 2400]) {
-        t.style.width = w + 'px'; await new Promise((r) => setTimeout(r, 120));
-        if (t.scrollWidth > t.clientWidth) bad.push(w);
+        t.style.width = w + 'px';
+        // A hidden test window delivers resize callbacks late, so give it up to 2 seconds.
+        let fit = false;
+        for (let k = 0; k < 20 && !fit; k++) { await new Promise((r) => setTimeout(r, 100)); fit = t.scrollWidth <= t.clientWidth; }
+        if (!fit) bad.push(w);
       }
       t.style.width = ''; return bad; })()`);
     check('...at every width from 1280 to 2400 px', fits.length === 0, fits.join(', '));
+    // Narrower (vertical monitors, half-screen windows, phones): what doesn't fit moves into the "⋯" menu.
+    const narrow = await run(`(async () => { const t = document.querySelector('.topbar'); const more = document.querySelector('#more-btn'); const bad = [];
+      for (const w of [1080, 900, 700, 540, 360]) {
+        t.style.width = w + 'px';
+        let fit = false;
+        for (let k = 0; k < 20 && !fit; k++) { await new Promise((r) => setTimeout(r, 100)); fit = t.scrollWidth <= t.clientWidth; }
+        const moved = [...t.querySelectorAll('.tb-btn.ovf')].map((b) => b.id);
+        let listed = [];
+        if (!more.hidden) { more.click(); listed = [...document.querySelectorAll('#more-menu [data-for]')].map((i) => i.dataset.for); more.click(); }
+        if (!fit || !moved.length || listed.join() !== moved.join()) bad.push(w + ' px: ' + moved.length + ' moved, ' + listed.length + ' listed');
+      }
+      // A menu item does what its button does: Layout opens the layout picker under the "⋯".
+      more.click(); document.querySelector('#more-menu [data-for="layout-btn"]').click();
+      const lm = document.querySelector('#layout-menu'); const picker = !lm.hidden && document.querySelector('#more-menu').hidden;
+      lm.hidden = true; t.style.width = ''; return { bad, picker }; })()`);
+    check('...and narrower, with the rest in the "⋯" menu', narrow.bad.length === 0, narrow.bad.join(', '));
+    check('...whose items work like the buttons', narrow.picker);
 
     check('no errors in the console', errors.length === 0, errors.slice(0, 3).join(' | '));
   } catch (e) {

@@ -1,0 +1,82 @@
+/* Options panel (public/js/options.js): stats, the chain, open interest by strike, unusual activity. */
+.options { height: 440px; }
+.op-symbol { font-weight: 700; color: var(--text-strong); margin-right: 4px; white-space: nowrap; }
+.op-tools { display: flex; align-items: center; gap: 8px; margin-left: 4px; font-size: 12px; white-space: nowrap; }
+.op-tools .select { height: 28px; font-size: 12px; max-width: 220px; }
+.op-count { font-size: 11.5px; }
+.op-src { font-size: 11.5px; white-space: nowrap; margin-right: 6px; }
+.op-src.op-live { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; color: var(--accent-text); }
+.op-src.op-live i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: nw-pulse 2s ease-in-out infinite; }
+
+.op-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.op-body .op-retry { align-self: center; margin-top: 6px; }
+.op-kpis { grid-template-columns: repeat(auto-fit, minmax(116px, 1fr)); }
+.op-kpis .st-kpi { padding: 6px 12px; }
+.op-kpis .st-kpi b { font-size: 15px; }
+.op-kpis .st-kpi span { overflow: hidden; text-overflow: ellipsis; }
+.op-main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(270px, 28%); }
+
+/* The chain */
+.op-chain { min-height: 0; overflow: auto; outline: none; }
+.op-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 12px; }
+.op-table thead { position: sticky; top: 0; z-index: 2; }
+.op-table th { background: var(--panel); color: var(--muted); font-weight: 600; font-size: 11px; text-align: right; padding: 4px 6px; white-space: nowrap; }
+.op-table thead tr:last-child th { border-bottom: 1px solid var(--border); }
+.op-grp th { text-align: center; text-transform: uppercase; letter-spacing: 0.05em; font-size: 10.5px; padding: 5px 8px 0; }
+.op-grp .op-calls { color: var(--up); }
+.op-grp .op-puts { color: var(--down); }
+.op-table td { padding: 3px 6px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; color: var(--text); }
+.op-table th.op-k, .op-table td.op-k { text-align: center; min-width: 66px; }
+.op-table td.op-k { font-weight: 700; color: var(--text-strong); background: var(--panel-2); }
+.op-table td.op-g { color: var(--muted); }
+.op-table td.itm { background: color-mix(in srgb, var(--text) 10%, transparent); }
+.op-table tbody tr:hover td { background-color: var(--hover); }
+.op-table tr.op-atm td.op-k { box-shadow: inset 0 0 0 1px var(--accent); }
+.op-chain.clickable td[data-side] { cursor: pointer; }
+.op-chain.clickable td[data-side]:hover { color: var(--accent-text); }
+.op-spot td { padding: 1px 8px; text-align: center; background: var(--accent-soft); border-bottom: 1px solid var(--accent); font-size: 11px; font-weight: 600; color: var(--accent-text); }
+
+/* Side: open interest chart and unusual activity */
+.op-side { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-left: 1px solid var(--border); }
+.op-box { display: flex; flex-direction: column; min-height: 0; }
+.op-oi { flex: 1.15; border-bottom: 1px solid var(--border); }
+.op-ua { flex: 1; }
+.op-h { display: flex; align-items: center; gap: 8px; padding: 6px 10px 2px; font-size: 12px; flex: none; }
+.op-h b { color: var(--text-strong); font-weight: 600; white-space: nowrap; }
+.op-h > span { margin-left: auto; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.op-key { color: var(--muted); }
+.op-key i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin: 0 3px 0 6px; vertical-align: -1px; }
+.op-key i.up { background: var(--up); }
+.op-key i.down { background: var(--down); }
+.op-key i.op-mp { width: 3px; background: #F7A600; }
+.op-canvas { position: relative; flex: 1; min-height: 70px; }
+.op-canvas canvas { position: absolute; left: 0; top: 0; display: block; }
+.op-ua-list { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 4px 6px; }
+.op-ua-row {
+  display: grid; grid-template-columns: 34px 62px minmax(0, 1fr) auto; align-items: center; gap: 6px;
+  width: 100%; padding: 4px 6px; border-radius: 6px; text-align: left; font-size: 12px; font-variant-numeric: tabular-nums;
+}
+.op-ua-row:hover { background: var(--hover); }
+.op-ua-row.static { cursor: default; }
+.op-ua-row .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.op-cp { font-size: 11px; font-weight: 700; }
+.op-cp.up { color: var(--up); }
+.op-cp.down { color: var(--down); }
+.op-ua-k { color: var(--text-strong); font-weight: 600; }
+.op-ua-x { color: var(--accent-text); font-weight: 700; }
+.op-note { padding: 8px 10px; color: var(--muted); font-size: 12px; }
+
+.op-foot { display: flex; align-items: center; gap: 8px; flex: none; min-height: 24px; padding: 3px 10px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); }
+.op-foot > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.op-foot > span:last-child { white-space: nowrap; }
+.op-tip small { font-weight: 500; margin-left: 4px; }
+
+/* Header button: icon only when space runs out (app.js fitHeader, like the other panel buttons). */
+.topbar.hdr-2 #op-btn span { display: none; }
+.topbar.hdr-2 #op-btn { width: 34px; padding: 0; justify-content: center; }
+.topbar.hdr-6 #op-btn { width: 30px; }
+
+@media (max-width: 900px) {
+  .op-main { grid-template-columns: minmax(0, 1fr); }
+  .op-side { display: none; }
+}

@@ -46,9 +46,67 @@ await test('unknown files are 404', async () => {
   assert.equal((await get('/nope.js')).status, 404);
 });
 
+await test('a badly encoded path is a 400, and the server keeps running', async () => {
+  for (const p of ['/%E0', '/%', '/js/%E0%A4%A.js']) {
+    const r = await get(p);
+    assert.equal(r.status, 400, p);
+    assert.equal((await r.json()).error, 'Bad path');
+  }
+  // A Host header that isn't a host name can't stop it either.
+  const { request } = await import('node:http');
+  const status = await new Promise((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port, path: '/', headers: { host: 'not a host' } }, (res) => { res.resume(); resolve(res.statusCode); });
+    req.on('error', reject);
+    req.end();
+  });
+  assert.equal(status, 400);
+  assert.equal((await get('/api/health')).status, 200);
+});
+
 await test('chart API wants a symbol', async () => {
   const r = await get('/api/yahoo/chart?tf=1D');
   assert.equal(r.status, 400);
+});
+
+await test('options API checks its input, and says when a symbol has no options', async () => {
+  for (const [q, error] of [['', 'bad symbol'], ['symbol=YAHOO%3A%3Cb%3E', 'bad symbol'], ['symbol=YAHOO%3ASPY&expiry=soon', 'bad expiry'],
+    ['symbol=OANDA%3AEURUSD', 'unknown source']]) {
+    const r = await get(`/api/options?${q}`);
+    assert.equal(r.status, 400, q);
+    assert.equal((await r.json()).error, error, q);
+  }
+  // A coin without options is answered without asking anyone.
+  const r = await get('/api/options?symbol=BINANCE%3ADOGEUSDT');
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get('access-control-allow-origin'), '*');
+  const j = await r.json();
+  assert.equal(j.symbol, 'BINANCE:DOGEUSDT');
+  assert.match(j.none, /Bitcoin and Ether only/);
+});
+
+await test('the script worker may not use the network', async () => {
+  const r = await get('/js/script-worker.js');
+  assert.equal(r.status, 200);
+  const csp = r.headers.get('content-security-policy') || '';
+  assert.match(csp, /default-src 'none'/);
+  assert.match(csp, /script-src 'self' 'unsafe-eval'/);
+  assert.doesNotMatch(csp, /connect-src/); // falls back to default-src 'none'
+  assert.equal((await get('/js/app.js')).headers.get('content-security-policy'), null);
+});
+
+await test('community library: index, scripts as plain text, nothing else', async () => {
+  process.env.WICKLINE_COMMUNITY = 'local';
+  const r = await get('/api/community/index.json');
+  assert.equal(r.status, 200);
+  const j = await r.json();
+  assert.ok(j.scripts.length > 10, `${j.scripts.length} scripts`);
+  const s = await get(`/api/community/${j.scripts[0].file}`);
+  assert.equal(s.status, 200);
+  assert.match(s.headers.get('content-type'), /text\/plain/);
+  assert.equal(s.headers.get('x-content-type-options'), 'nosniff');
+  for (const p of ['/api/community/README.md', '/api/community/..%2f..%2fpackage.json', '/api/community/scripts/nope.js']) {
+    assert.equal((await get(p)).status, 404, p);
+  }
 });
 
 server.close();

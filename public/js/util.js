@@ -18,9 +18,26 @@ export function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+const numberFormats = new Map();
+/**
+ * A cached Intl.NumberFormat('en-US', { minimumFractionDigits: min, maximumFractionDigits: max })
+ * (undefined: the default). Same output as v.toLocaleString('en-US', {...}), which builds a new
+ * formatter on every call (~15 µs each).
+ */
+export function numberFormat(min, max) {
+  const key = `${min}|${max}`;
+  let f = numberFormats.get(key);
+  if (!f) {
+    f = new Intl.NumberFormat('en-US', { minimumFractionDigits: min, maximumFractionDigits: max });
+    if (numberFormats.size >= 64) numberFormats.clear();
+    numberFormats.set(key, f);
+  }
+  return f;
+}
+
 export function formatNumber(v, decimals) {
   if (v == null || !Number.isFinite(v)) return '—';
-  return v.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  return numberFormat(decimals, decimals).format(v);
 }
 
 /** Sensible decimals when the instrument's tick size is unknown. */

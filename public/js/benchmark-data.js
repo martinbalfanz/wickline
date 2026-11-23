@@ -79,3 +79,58 @@ export class BenchmarkFeedCache {
     this.entries.clear();
   }
 }
+
+
+/** Per-chart adapter: independent feeds shared across its script indicators. */
+export class ScriptBenchmarks {
+  constructor(view, createFeed) {
+    this.view = view;
+    this.tfId = view.state.tf;
+    this.cache = new BenchmarkFeedCache(createFeed, symbol => {
+      if (this.view.destroyed) return;
+      for (const entry of this.view.live.values()) {
+        if (entry.script && entry.benchmarkSymbols?.includes(symbol)) this.view.runScript(entry);
+      }
+    });
+  }
+
+  resetTimeframe() {
+    if (this.tfId === this.view.state.tf) return;
+    this.cache.clear();
+    this.tfId = this.view.state.tf;
+  }
+
+  closes() {
+    const view = this.view;
+    const result = {};
+    const tz = view.meta.tzOffset || 0;
+    for (const [symbol, entry] of view.compareEntries) {
+      result[symbol] = alignBenchmarkCloses(view.bars, entry.bars || [], tz, entry.tz || 0);
+    }
+    for (const [symbol] of this.cache.entries) {
+      const entry = this.cache.get(symbol, view.state.tf);
+      if (entry) result[symbol] = alignBenchmarkCloses(view.bars, entry.bars, tz, entry.tz);
+    }
+    // Comparing the active symbol against itself needs no second fetch.
+    result[view.state.symbol] = view.bars.map(bar => bar.close);
+    return result;
+  }
+
+  update(entry, requested) {
+    entry.benchmarkSymbols = Array.isArray(requested) ? requested : [];
+    for (const symbol of entry.benchmarkSymbols) {
+      if (symbol !== this.view.state.symbol) this.cache.ensure(symbol, this.view.tf, this.view.state.tf);
+    }
+    this.prune();
+  }
+
+  prune() {
+    const required = new Set();
+    for (const entry of this.view.live.values()) {
+      if (entry.script) for (const symbol of entry.benchmarkSymbols || []) required.add(symbol);
+    }
+    this.cache.prune(required);
+  }
+
+  close() { this.cache.clear(); }
+}

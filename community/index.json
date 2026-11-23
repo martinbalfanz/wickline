@@ -1,0 +1,328 @@
+{
+  "version": 1,
+  "updated": "2026-11-23T10:33:49Z",
+  "scripts": [
+    {
+      "id": "wickline-ema-cross-signals",
+      "issue": null,
+      "name": "EMA Cross Signals",
+      "description": "Two EMAs with a shaded gap and buy/sell markers where they cross.",
+      "kind": "indicator",
+      "tags": [
+        "ema",
+        "crossover"
+      ],
+      "author": "Wickline",
+      "created": "2026-11-23T01:06:41Z",
+      "updated": "2026-11-23T01:07:00Z",
+      "likes": 0,
+      "file": "scripts/wickline-ema-cross-signals.js",
+      "size": 779,
+      "sha256": "1f761a9be160dfce0cb0dcd5ac13e14c520423aec345d8250f8d21a4cf893a41"
+    },
+    {
+      "id": "wickline-rsi-zones",
+      "issue": null,
+      "name": "RSI Zones",
+      "description": "RSI in its own pane; the line turns red when overbought and green when oversold.",
+      "kind": "indicator",
+      "tags": [
+        "rsi"
+      ],
+      "author": "Wickline",
+      "created": "2026-11-23T01:06:42Z",
+      "updated": "2026-11-23T01:07:00Z",
+      "likes": 0,
+      "file": "scripts/wickline-rsi-zones.js",
+      "size": 588,
+      "sha256": "964f757b89388124185b888d1474276de7d7e975f9789b0196a83e5165399918"
+    },
+    {
+      "id": "wickline-volume-spikes",
+      "issue": null,
+      "name": "Volume Spikes",
+      "description": "Marks bars whose volume is far above its recent average.",
+      "kind": "indicator",
+      "tags": [
+        "volume"
+      ],
+      "author": "Wickline",
+      "created": "2026-11-23T01:06:43Z",
+      "updated": "2026-11-23T01:07:00Z",
+      "likes": 0,
+      "file": "scripts/wickline-volume-spikes.js",
+      "size": 654,
+      "sha256": "4332a788d962334b7ed2400a0c06c312cffbb8356ec5227831e60a74517f1c7f"
+    },
+    {
+      "id": "wickline-macd-colors",
+      "issue": null,
+      "name": "MACD Colors",
+      "description": "MACD with a histogram colored by direction and whether it is growing or fading.",
+      "kind": "indicator",
+      "tags": [
+        "macd"
+      ],
+      "author": "Wickline",
+      "created": "2026-11-23T01:06:44Z",
+      "updated": "2026-11-23T01:07:00Z",
+      "likes": 0,
+      "file": "scripts/wickline-macd-colors.js",
+      "size": 634,
+      "sha256": "671d618ad8757763c4d7c4d1d18ecac28776dece22892d2385a3670e3819b118"
+    },
+    {
+      "id": "wickline-ema-cross-strategy",
+      "issue": null,
+      "name": "EMA Cross Strategy",
+      "description": "Goes long when the fast EMA crosses above the slow one and short when it crosses below, with a stop loss and a take profit on every trade. Results appear in the Strategy tester.",
+      "kind": "strategy",
+      "tags": [
+        "ema"
+      ],
+      "author": "Wickline",
+      "created": "2026-11-23T01:06:45Z",
+      "updated": "2026-11-23T01:07:00Z",
+      "likes": 0,
+      "file": "scripts/wickline-ema-cross-strategy.js",
+      "size": 955,
+      "sha256": "7a5b842db336f869d0fb5a0fb7576a8d4e1ce4edfee27fefdfb97672dbd70c2b"
+    },
+    {
+      "id": "wickline-rsi-mean-reversion",
+      "issue": null,
+      "name": "RSI Mean Reversion",
+      "description": "Buys when RSI climbs back above the oversold level and sells when it reaches the exit level.",
+      "kind": "strategy",
+      "tags": [
+        "rsi",
+        "mean-reversion"
+      ],
+      "author": "Wickline",
+      "created": "2026-11-23T01:06:46Z",
+      "updated": "2026-11-23T01:07:00Z",
+      "likes": 0,
+      "file": "scripts/wickline-rsi-mean-reversion.js",
+      "size": 745,
+      "sha256": "2aed48ed44562c678db1c39e680d030f5d12395646d14c50ccdf34ac58809acf"
+    },
+    {
+      "id": "wickline-breakout-trailing-stop",
+      "issue": null,
+      "name": "Breakout + Trailing Stop",
+      "description": "Buys a breakout above the highest high of the last N bars and rides it with a trailing stop.",
+      "kind": "strategy",
+      "tags": [
+        "breakout",
+        "trailing-stop"
+      ],
+      "author": "Wickline",
+      "created": "2026-11-23T01:06:47Z",
+      "updated": "2026-11-23T10:33:49Z",
+      "likes": 0,
+      "file": "scripts/wickline-breakout-trailing-stop.js",
+      "size": 1037,
+      "sha256": "2ccdedb951aa0102091f3d9fef4e7049c4ba3810b1a163650a603513324b9da5"
+    },
+    {
+      "id": "wickline-supertrend-time-stop",
+      "issue": null,
+      "name": "Supertrend + Time Stop",
+      "description": "Enters when Supertrend turns up and exits when it turns down or after a maximum number of bars. It uses strategy.onBar, which runs once per bar, for logic that depends on the open position.",
+      "kind": "strategy",
+      "tags": [
+        "supertrend"
+      ],
+      "author": "Wickline",
+      "created": "2026-11-23T01:06:48Z",
+      "updated": "2026-11-23T01:07:00Z",
+      "likes": 0,
+      "file": "scripts/wickline-supertrend-time-stop.js",
+      "size": 1013,
+      "sha256": "a4a021d9b597f7f516615cb578ba8dfa175aa5dcc363478a1af9ecf6f099421a"
+    },
+    {
+      "id": "wickline-golden-cross",
+      "issue": null,
+      "name": "Golden Cross",
+      "description": "The classic long-term trend signal: be long while the 50-period SMA is above the 200, and step aside when it falls back below.",
+      "kind": "strategy",
+      "tags": [
+        "sma",
+        "trend"
+      ],
+      "author": "Wickline",
+      "created": "2026-11-23T01:06:49Z",
+      "updated": "2026-11-23T10:33:49Z",
+      "likes": 0,
+      "file": "scripts/wickline-golden-cross.js",
+      "size": 870,
+      "sha256": "82b96b30bfc2b1e35a859aaf9de446d98da244be857a5ad8bdb58ba2329c486b"
+    },
+    {
+      "id": "wickline-macd-trend-filter",
+      "issue": null,
+      "name": "MACD + Trend Filter",
+      "description": "Trades MACD signal-line crosses, but only in the direction of the long-term trend: longs above the 200 EMA, shorts below it. Every trade has a stop loss and a take profit.",
+      "kind": "strategy",
+      "tags": [
+        "ema",
+        "macd",
+        "trend"
+      ],
+      "author": "Wickline",
+      "created": "2026-11-23T01:06:50Z",
+      "updated": "2026-11-23T01:07:00Z",
+      "likes": 0,
+      "file": "scripts/wickline-macd-trend-filter.js",
+      "size": 1340,
+      "sha256": "d5cf9bedc36ce4b97e6b26d0bbf3f04a7607d7ade5274d17f46509c299f36a34"
+    },
+    {
+      "id": "wickline-bollinger-mean-reversion",
+      "issue": null,
+      "name": "Bollinger Mean Reversion",
+      "description": "Buys when price closes back above the lower Bollinger Band (a stretched move snapping back) and sells when it reaches the middle band.",
+      "kind": "strategy",
+      "tags": [
+        "bollinger",
+        "mean-reversion"
+      ],
+      "author": "Wickline",
+      "created": "2026-11-23T01:06:51Z",
+      "updated": "2026-11-23T01:07:00Z",
+      "likes": 0,
+      "file": "scripts/wickline-bollinger-mean-reversion.js",
+      "size": 908,
+      "sha256": "7e69ce4f99eb1c2a5e467765dd028cc562874898c4031db04879ae0b8c569bfa"
+    },
+    {
+      "id": "wickline-turtle-breakout",
+      "issue": null,
+      "name": "Turtle Breakout",
+      "description": "The Turtle traders' rules: buy a 20-bar high, sell a 10-bar low, and get out if price closes 2 ATRs below the entry.",
+      "kind": "strategy",
+      "tags": [
+        "breakout",
+        "donchian"
+      ],
+      "author": "Wickline",
+      "created": "2026-11-23T01:06:52Z",
+      "updated": "2026-11-23T10:33:49Z",
+      "likes": 0,
+      "file": "scripts/wickline-turtle-breakout.js",
+      "size": 1285,
+      "sha256": "2a02ae6c80de23bfc9e4e4320e4bf14ef90e2938bd6cc33f4aea789c0dad654c"
+    },
+    {
+      "id": "wickline-rsi-2-pullback",
+      "issue": null,
+      "name": "RSI(2) Pullback",
+      "description": "A short-term pullback system: when price is above its 200 SMA (an uptrend), buy when the 2-period RSI is deeply oversold, and sell as soon as price closes above its 5 SMA.",
+      "kind": "strategy",
+      "tags": [
+        "sma",
+        "rsi",
+        "pullback"
+      ],
+      "author": "Wickline",
+      "created": "2026-11-23T01:06:53Z",
+      "updated": "2026-11-23T10:33:49Z",
+      "likes": 0,
+      "file": "scripts/wickline-rsi-2-pullback.js",
+      "size": 1116,
+      "sha256": "12829a1f238293a0d83fbe37309cdc6dfafb185cde90ddaa970094a2a379dc89"
+    },
+    {
+      "id": "wickline-supertrend-adx",
+      "issue": null,
+      "name": "Supertrend + ADX",
+      "description": "Follows Supertrend flips both ways, but only opens a trade when ADX says the market is actually trending (above the threshold). A flip the other way closes the trade.",
+      "kind": "strategy",
+      "tags": [
+        "supertrend",
+        "adx"
+      ],
+      "author": "Wickline",
+      "created": "2026-11-23T01:06:54Z",
+      "updated": "2026-11-23T01:07:00Z",
+      "likes": 0,
+      "file": "scripts/wickline-supertrend-adx.js",
+      "size": 1190,
+      "sha256": "50897b36eb9ba433b205b3f86c17556d5737454d167b9b1cfba0e45376b7a91e"
+    },
+    {
+      "id": "wickline-parabolic-sar-flip",
+      "issue": null,
+      "name": "Parabolic SAR Flip",
+      "description": "Always in the market: long while price is above the Parabolic SAR, short while it is below.",
+      "kind": "strategy",
+      "tags": [
+        "parabolic-sar"
+      ],
+      "author": "Wickline",
+      "created": "2026-11-23T01:06:55Z",
+      "updated": "2026-11-23T01:07:00Z",
+      "likes": 0,
+      "file": "scripts/wickline-parabolic-sar-flip.js",
+      "size": 848,
+      "sha256": "76083e9c08212967ef6c4809f535f120267d78f7f7bf8088db4cda48df2a2940"
+    },
+    {
+      "id": "wickline-stochastic-pullback",
+      "issue": null,
+      "name": "Stochastic Pullback",
+      "description": "Buys when the Stochastic turns up from oversold while price is above its 200 EMA, and sells when the Stochastic reaches overbought (or on the stop loss).",
+      "kind": "strategy",
+      "tags": [
+        "ema",
+        "stochastic",
+        "pullback"
+      ],
+      "author": "Wickline",
+      "created": "2026-11-23T01:06:56Z",
+      "updated": "2026-11-23T01:07:00Z",
+      "likes": 0,
+      "file": "scripts/wickline-stochastic-pullback.js",
+      "size": 1376,
+      "sha256": "201c75366af12cb821baf80bf448b7454e67a5dfce0ba1b534bd8cffa210ae3a"
+    },
+    {
+      "id": "wickline-squeeze-breakout",
+      "issue": null,
+      "name": "Squeeze Breakout",
+      "description": "Volatility comes in waves: when the Bollinger Bands get as narrow as they have been in a while (a squeeze), trade the first close outside the bands, and ride it with a trailing stop.",
+      "kind": "strategy",
+      "tags": [
+        "bollinger",
+        "breakout",
+        "trailing-stop",
+        "squeeze"
+      ],
+      "author": "Wickline",
+      "created": "2026-11-23T01:06:57Z",
+      "updated": "2026-11-23T10:33:49Z",
+      "likes": 0,
+      "file": "scripts/wickline-squeeze-breakout.js",
+      "size": 1809,
+      "sha256": "ea3bdae3fc3bd17e4f7f475009494fda46556b9332eb93ed32276de38802ffd9"
+    },
+    {
+      "id": "wickline-range-breakout",
+      "issue": null,
+      "name": "Range Breakout",
+      "description": "Highest high and lowest low of the last N bars, with markers on breakouts.",
+      "kind": "indicator",
+      "tags": [
+        "breakout"
+      ],
+      "author": "Wickline",
+      "created": "2026-11-23T01:06:58Z",
+      "updated": "2026-11-23T01:07:00Z",
+      "likes": 0,
+      "file": "scripts/wickline-range-breakout.js",
+      "size": 979,
+      "sha256": "c6be486f47072a8170aa68a4ed2347fbb128848400f337b9e51d8f2604f0ce50"
+    }
+  ]
+}

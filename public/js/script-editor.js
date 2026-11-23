@@ -1,6 +1,7 @@
 // The script editor panel: write, save and add your own JavaScript indicators.
 
 import { scriptStore, TEMPLATES, engine } from './scripts.js';
+import { openPublish } from './community.js';
 import { $, esc, store } from './util.js';
 
 const KEYWORDS = new Set(['const', 'let', 'var', 'function', 'return', 'if', 'else', 'for', 'while', 'of', 'in', 'new',
@@ -54,21 +55,25 @@ Use normal JavaScript: <code>close.map((c, i) =&gt; c - open[i])</code>.</p>
 <h4>Output</h4>
 <p><code>plot(values, { title, color, style, width })</code> — style: <code>line</code>, <code>histogram</code>,
 <code>dots</code>, <code>step</code>. <code>color</code> can be one color or an array/function with a color per bar.
-Set <code>legend: false</code> to hide helper plots in the legend. Returns an id for <code>fill</code>.</p>
+Set <code>legend: false</code> to hide helper plots from the legend. Returns an id for <code>fill</code>.</p>
 <p><code>hline(70, { color })</code> horizontal level ·
 <code>fill(a, b, { color })</code> shade between two plots (or two numbers) ·
 <code>marker(conditions, { position: 'above'|'below', shape: 'up'|'down'|'circle'|'square', color, text })</code>
-marks every bar where the condition is true · <code>compareClose('YAHOO:QQQ')</code> loads aligned benchmark closes without a visible comparison · <code>dashboard({ status, tone, metrics })</code> adds a compact pane status header · <code>log(...)</code> prints to this console.</p>
+marks every bar where the condition is true · <code>compareClose('YAHOO:QQQ')</code> loads another symbol's closes in the background · <code>dashboard({ status, tone, metrics })</code> displays a compact status header · <code>log(...)</code> prints to this console.</p>
 <h4>ta — technical analysis (return arrays)</h4>
-<p><code>sma ema wma rma hma dema tema alma vwma(src, vol, len) linreg stdev sum cum highest lowest
-change mom roc shift(src, k) rsi cci</code> — called as <code>ta.ema(close, 20)</code>.</p>
+<p><code>sma ema wma rma hma dema tema alma kama zlema t3 mcginley vidya trima vwma(src, vol, len) linreg linregSlope
+stdev sum cum highest lowest change mom roc shift(src, k) rsi cci ppo kst stc zscore percentrank streak
+laguerreRsi connorsRsi rvi er vhf pfe ulcer stderrBands</code> — called as <code>ta.ema(close, 20)</code>.</p>
 <p><code>macd(src, 12, 26, 9)</code> → <code>{ macd, signal, hist }</code> ·
 <code>bb(src, 20, 2)</code> → <code>{ upper, basis, lower }</code> ·
 <code>stoch(close, high, low, 14)</code> · <code>crossover(a, b) crossunder(a, b) cross(a, b)</code> →
 true/false per bar · <code>pivothigh(src, 5, 5) pivotlow(src, 5, 5)</code>.</p>
-<p>Using this chart's bars: <code>atr(14) tr() mfi(14) obv() wpr(14) vwap() psar(0.02, 0.02, 0.2)
-dmi(14, 14)</code> → <code>{ plus, minus, adx }</code>, <code>supertrend(3, 10)</code> →
-<code>{ value, direction }</code>.</p>
+<p>Using this chart's bars: <code>atr(14) tr() mfi(14) obv() wpr(14) vwap() atrp eom nvi pvi qstick imi
+massIndex chaikinVolatility</code>, <code>dmi(14, 14)</code> → <code>{ plus, minus, adx }</code>,
+<code>supertrend(3, 10)</code> → <code>{ value, direction }</code>, <code>psar(0.02, 0.02, 0.2)</code> →
+<code>{ sar, dir }</code>, and more that return several lines: <code>alligator chandelier chandeKroll ssl rwi
+elderRay smi rvgi squeeze klinger vwmacd starc vwapBands</code> (use <code>log(Object.keys(ta.squeeze()))</code>
+to see what one returns).</p>
 <h4>Strategies (backtesting)</h4>
 <pre>strategy('My strategy', { capital: 10000, size: { percent: 100 }, commission: 0.1 })
 strategy.entry('Long', 'long', ta.crossover(fast, slow))
@@ -119,6 +124,7 @@ export class ScriptEditor {
     $('#ed-save').addEventListener('click', () => this.save());
     $('#ed-add').addEventListener('click', () => this.addToChart());
     $('#ed-delete').addEventListener('click', () => this.remove());
+    $('#ed-publish').addEventListener('click', () => this.publish());
     $('#ed-close').addEventListener('click', () => this.close());
     $('#ed-docs').addEventListener('click', () => {
       const p = $('#ed-docs-panel');
@@ -132,12 +138,22 @@ export class ScriptEditor {
 
     // New script menu
     const menu = $('#ed-new-menu');
-    menu.innerHTML = TEMPLATES.map((t, i) => `<button class="layout-opt" data-tpl="${i}">${esc(t.name)}</button>`).join('');
+    // Two groups, so a signals indicator is never mistaken for a strategy that can be backtested.
+    const isStrategy = (t) => /^\s*strategy\(/m.test(t.code);
+    const item = (t) => `<button class="layout-opt" data-tpl="${TEMPLATES.indexOf(t)}">${esc(t.name.replace(/^Strategy: /, ''))}</button>`;
+    const group = (title, note, list) => `<div class="menu-title">${title}<small>${note}</small></div>${list.map(item).join('')}`;
+    menu.innerHTML = group('Indicators', 'draw on the chart, no backtest', TEMPLATES.filter((t) => !isStrategy(t)))
+      + group('Strategies', 'trade and show results in the Strategy tester', TEMPLATES.filter(isStrategy));
     $('#ed-new').addEventListener('click', () => {
       menu.hidden = !menu.hidden;
+      if (menu.hidden) return;
+      // Open on the side with more room and scroll within it, never covering the New button.
       const r = $('#ed-new').getBoundingClientRect();
+      const above = r.top - 12, below = window.innerHeight - r.bottom - 12;
       menu.style.left = `${r.left}px`;
-      menu.style.top = `${Math.max(8, r.top - menu.offsetHeight - 4)}px`;
+      menu.style.maxHeight = `${Math.max(120, Math.max(above, below))}px`;
+      menu.style.overflowY = 'auto';
+      menu.style.top = above >= below ? `${Math.max(8, r.top - menu.offsetHeight - 4)}px` : `${r.bottom + 4}px`;
     });
     menu.addEventListener('click', (e) => {
       const b = e.target.closest('[data-tpl]');
@@ -298,7 +314,7 @@ export class ScriptEditor {
     const view = this.getView();
     const bars = view?.bars?.length ? view.bars : sampleBars();
     try {
-      const res = await engine().run(this.text.value, bars, {}, { tfSec: view?.tf?.sec || 3600, symbol: view?.state?.symbol || '' });
+      const res = await engine().run(this.text.value, bars, {}, { tfSec: view?.tf?.sec || 3600, symbol: view?.state?.symbol || '', compareCloses: view?.scriptBenchmarks?.closes() || {} }, this.current);
       for (const l of res.logs || []) this.print('log', l);
       const parts = [`${res.plots.length} plot${res.plots.length === 1 ? '' : 's'}`];
       if (res.markers.length) parts.push(`${res.markers.length} markers`);
@@ -336,6 +352,19 @@ export class ScriptEditor {
       view.addScript(this.current);
       this.toast(`Added “${this.nameInput.value}” to the chart`);
     }
+  }
+
+  /** Checks the script compiles, then opens the Publish dialog (it continues on GitHub). */
+  async publish() {
+    const res = await this.compile();
+    if (!res) { this.print('error', 'Fix the errors above before publishing.'); return; }
+    const mine = this.current && scriptStore.get(this.current);
+    if (mine?.community && mine.community.author !== undefined) {
+      this.print('info', `This is “${mine.name}” from the community library by ${mine.community.author}. If you changed it, give it a new name before publishing your version.`);
+    }
+    // The comment header a published script starts with isn't part of what the author wrote.
+    const code = this.text.value.replace(/^\/\/ .*\n\/\/ Wickline community script by .*\n(\/\/ Discussion, updates and likes: .*\n)?\n/, '');
+    openPublish({ name: this.nameInput.value.trim() || res.meta.name, code }, { toast: this.toast });
   }
 
   remove() {

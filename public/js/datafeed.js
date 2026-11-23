@@ -9,21 +9,11 @@ import { apiUrl, dataMode } from './env.js';
 import { YahooDirectStream } from './yahoo-direct.js';
 import { tdBars, tdSearch, tdQuotes } from './twelvedata.js';
 import { store } from './util.js';
+import { tfById, basePlan, aggregateUtc, groupBars, utcBucket, sessionStart } from './timeframes.js';
 
-export const TIMEFRAMES = [
-  { id: '1m', label: '1m', sec: 60 },
-  { id: '5m', label: '5m', sec: 300 },
-  { id: '15m', label: '15m', sec: 900 },
-  { id: '30m', label: '30m', sec: 1800 },
-  { id: '1h', label: '1H', sec: 3600 },
-  { id: '2h', label: '2H', sec: 7200 },
-  { id: '4h', label: '4H', sec: 14400 },
-  { id: '1D', label: 'D', sec: 86400, daily: true },
-  { id: '1W', label: 'W', sec: 604800, daily: true },
-  { id: '1M', label: 'M', sec: 2629800, daily: true },
-];
-
-export const tfById = (id) => TIMEFRAMES.find((t) => t.id === id) || TIMEFRAMES[4];
+// Any timeframe works (see timeframes.js); these are the ones the app has always had.
+export const TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '2h', '4h', '1D', '1W', '1M'].map(tfById);
+export { tfById };
 
 export const SOURCES = {
   BINANCE: { name: 'Binance', crypto: true },
@@ -49,36 +39,11 @@ export const isCryptoSymbol = (full) => !!SOURCES[parseSymbol(full).source]?.cry
 
 /** Seconds to add to UTC so intraday crypto bars show in the viewer's local time. */
 const localOffset = () => -new Date().getTimezoneOffset() * 60;
-const DAY = 86400;
 
 function decimalsFromTick(tick) {
   const s = String(tick).replace(/0+$/, '');
   const dot = s.indexOf('.');
   return dot < 0 ? 0 : s.length - dot - 1;
-}
-
-/** Groups bars into larger ones: a fixed number of seconds, 'W' (weeks from Monday) or 'M' (months). */
-function aggregate(bars, unit) {
-  const bucketOf = (t) => {
-    if (unit === 'W') { const day = Math.floor(t / DAY); return (day - ((day + 3) % 7)) * DAY; }
-    if (unit === 'M') { const d = new Date(t * 1000); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000; }
-    return Math.floor(t / unit) * unit;
-  };
-  const out = [];
-  let cur = null;
-  for (const b of bars) {
-    const t = bucketOf(b.time);
-    if (cur && cur.time === t) {
-      cur.high = Math.max(cur.high, b.high);
-      cur.low = Math.min(cur.low, b.low);
-      cur.close = b.close;
-      cur.volume += b.volume;
-    } else {
-      cur = { ...b, time: t };
-      out.push(cur);
-    }
-  }
-  return out;
 }
 
 async function getJson(url) {
@@ -87,6 +52,8 @@ async function getJson(url) {
   if (!r.ok) {
     const err = new Error(body?.error || body?.msg || body?.message || `HTTP ${r.status}`);
     err.status = r.status;
+    const wait = Number(r.headers?.get?.('Retry-After')); // seconds (when the server lets us read it)
+    if (wait > 0) err.retryAfter = wait;
     throw err;
   }
   return body;
@@ -105,13 +72,19 @@ const BINANCE = {
   BINANCEF: {
     rest: ['https://fapi.binance.com'],
     ws: ['wss://fstream.binance.com'],
-    klines: '/fapi/v1/klines', ticker24: '/fapi/v1/ticker/24hr', limit: 1500,
+    // Futures klines weigh 5 up to 1000 a page and 10 above (spot: 2 at any size).
+    klines: '/fapi/v1/klines', ticker24: '/fapi/v1/ticker/24hr', limit: 1000,
   },
 };
-const BINANCE_INTERVAL = { '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m', '1h': '1h', '2h': '2h', '4h': '4h', '1D': '1d', '1W': '1w', '1M': '1M' };
 const restIndex = { BINANCE: 0, BINANCEF: 0 };
+// Binance answers too many requests with 429 and, if they keep coming, 418: the IP is banned for
+// minutes to days. After either, no more requests to that market until it says (or a while).
+const backoffUntil = { BINANCE: 0, BINANCEF: 0 };
 
 async function binanceGet(src, path) {
+  if (Date.now() < backoffUntil[src]) {
+    throw Object.assign(new Error(`${SOURCES[src].name} asked for fewer requests; trying again shortly`), { status: 429 });
+  }
   const hosts = BINANCE[src].rest;
   let lastErr;
   for (let k = 0; k < hosts.length; k++) {
@@ -125,11 +98,23 @@ async function binanceGet(src, path) {
       if (e.status === 400) break; // invalid symbol etc. — another host will say the same
     }
   }
+  if (lastErr.status === 429 || lastErr.status === 418) {
+    const wait = lastErr.retryAfter > 0 ? lastErr.retryAfter * 1000 : lastErr.status === 418 ? 120000 : 30000;
+    backoffUntil[src] = Math.max(backoffUntil[src], Date.now() + wait);
+  }
   throw lastErr;
 }
 
 let futuresInfo = null;
 const futuresExchangeInfo = () => (futuresInfo ||= binanceGet('BINANCEF', '/fapi/v1/exchangeInfo').catch((e) => { futuresInfo = null; throw e; }));
+
+/**
+ * Crypto timeframes the exchange doesn't have are grouped from a smaller interval, on a UTC grid
+ * that restarts each day like the exchange's own bars. Feeds use this for live trades too.
+ */
+function cryptoBucketOf(feed) {
+  return feed.tf.daily ? null : (t) => utcBucket(t - feed.shift, feed.tf) + feed.shift;
+}
 
 class BinanceFeed {
   constructor(src, ticker, tf) {
@@ -137,15 +122,84 @@ class BinanceFeed {
     this.cfg = BINANCE[src];
     this.ticker = ticker.toUpperCase();
     this.tf = tf;
-    this.interval = BINANCE_INTERVAL[tf.id];
+    // e.g. 10m from 5m klines: enough pages of them for about as many bars as a native interval.
+    this.plan = basePlan(tf, 'binance');
+    this.interval = this.plan.native;
+    this.baseMs = this.plan.base.sec * 1000;
+    this.pages = this.plan.agg ? Math.min(6, this.plan.factor) : 1;
     this.shift = tf.daily ? 0 : localOffset();
     this.canLoadMore = true;
     this.ws = null;
     this.closed = false;
+    this.recent = new Map(); // grouped timeframes: base klines (UTC) of the newest bar, by open time
+    this.liveStart = -Infinity; // ...and that bar's start (UTC)
+    this.seeded = false;
+    this.seedTimer = null;
+    this.bucketOf = cryptoBucketOf(this);
   }
 
-  toBar(k) {
-    return { time: Math.floor(k[0] / 1000) + this.shift, open: +k[1], high: +k[2], low: +k[3], close: +k[4], volume: +k[5] };
+  rawBar(k) {
+    return { time: Math.floor(k[0] / 1000), open: +k[1], high: +k[2], low: +k[3], close: +k[4], volume: +k[5] };
+  }
+
+  /** UTC klines → chart bars (grouped when the timeframe isn't native, in the viewer's time). */
+  toChart(raw) {
+    const bars = this.plan.agg ? aggregateUtc(raw, this.tf) : raw;
+    return bars.map((b) => ({ ...b, time: b.time + this.shift }));
+  }
+
+  /**
+   * `pages` pages of klines ending at endMs (now if null), oldest first. Two at a time, each pair
+   * continuing before the oldest kline so far, and none after a short page (the start of the
+   * history): Binance meters requests by weight and answers bursts with bans (see binanceGet).
+   * The newest page comes first on its own: the exchange's "now", not this computer's clock
+   * (which may be off), sets where the older pages end.
+   */
+  async fetchRaw(endMs) {
+    const limit = this.cfg.limit;
+    const span = limit * this.baseMs;
+    const pages = []; // newest first
+    let end = endMs; // null: up to now
+    for (let k = 0; k < this.pages;) {
+      const n = end == null ? 1 : Math.min(2, this.pages - k);
+      let batch;
+      try {
+        batch = await Promise.all(Array.from({ length: n }, (_, j) => binanceGet(this.src,
+          `${this.cfg.klines}?symbol=${this.ticker}&interval=${this.interval}&limit=${limit}${end == null ? '' : `&endTime=${end - j * span}`}`)));
+      } catch (e) {
+        if (!pages.length) throw e;
+        break; // keep what came; scrolling back continues from there (after any back-off)
+      }
+      pages.push(...batch);
+      k += n;
+      const last = batch[n - 1];
+      if (last.length < limit) { this.canLoadMore = false; break; }
+      end = last[0][0] - 1;
+    }
+    const seen = new Set();
+    return pages.reverse().flat().map((k) => this.rawBar(k)).filter((b) => (seen.has(b.time) ? false : seen.add(b.time)));
+  }
+
+  /**
+   * Grouped timeframes: remember the klines (oldest first) of the newest bar, to keep building it
+   * live from the kline stream. A late update of an older kline is ignored.
+   */
+  remember(raw) {
+    if (!this.plan.agg) return;
+    for (const b of raw) {
+      const start = utcBucket(b.time, this.tf);
+      if (start < this.liveStart) continue;
+      if (start > this.liveStart) { this.liveStart = start; this.recent.clear(); }
+      const have = this.recent.get(b.time);
+      if (!have || b.volume >= have.volume) this.recent.set(b.time, b); // a kline's volume only grows
+    }
+  }
+
+  /** The newest grouped bar, from the remembered klines. */
+  liveBar() {
+    const parts = [...this.recent.values()].sort((a, b) => a.time - b.time);
+    if (!parts.length) return null;
+    return { ...groupBars(parts, () => this.liveStart)[0], time: this.liveStart + this.shift };
   }
 
   async symbolInfo() {
@@ -154,12 +208,13 @@ class BinanceFeed {
   }
 
   async loadInitial() {
-    const [s, klines] = await Promise.all([
+    const [s, raw] = await Promise.all([
       this.symbolInfo().catch(() => null),
-      binanceGet(this.src, `${this.cfg.klines}?symbol=${this.ticker}&interval=${this.interval}&limit=${this.cfg.limit}`),
+      this.fetchRaw(null),
     ]);
     const tick = s?.filters?.find((f) => f.filterType === 'PRICE_FILTER')?.tickSize || '0.01';
-    if (klines.length < this.cfg.limit) this.canLoadMore = false;
+    this.remember(raw);
+    this.seeded = true;
     return {
       meta: {
         symbol: this.ticker,
@@ -170,39 +225,69 @@ class BinanceFeed {
         precision: Math.min(decimalsFromTick(tick), 8),
         tzOffset: this.shift,
       },
-      bars: klines.map((k) => this.toBar(k)),
+      bars: this.toChart(raw),
     };
   }
 
   async loadOlder(firstTime) {
     if (!this.canLoadMore) return [];
-    const endTime = (firstTime - this.shift) * 1000 - 1;
-    const klines = await binanceGet(this.src, `${this.cfg.klines}?symbol=${this.ticker}&interval=${this.interval}&limit=${this.cfg.limit}&endTime=${endTime}`);
-    if (klines.length < this.cfg.limit) this.canLoadMore = false;
-    return klines.map((k) => this.toBar(k)).filter((b) => b.time < firstTime);
+    // The first bar starts a full bar, so the klines before it make whole bars.
+    const raw = await this.fetchRaw((firstTime - this.shift) * 1000 - 1);
+    return this.toChart(raw).filter((b) => b.time < firstTime);
   }
 
-  /** The kline stream gives the official bar every ~2 s; the trade stream moves the price on every trade. */
+  /**
+   * The kline stream gives the official bar every ~2 s; the trade stream moves the price on every
+   * trade. Grouped timeframes (10m from 5m klines) rebuild their newest bar from its klines.
+   */
   subscribe({ bars, tick, status }) {
     let host = 0, retry = 0;
     const sym = this.ticker.toLowerCase();
+    const emitLive = () => { const b = this.liveBar(); if (b) bars([b]); };
+    // After a reconnect, klines may have been missed: fetch the newest bar's klines again first.
+    // Until that works the grouped bar gets no official updates, so a failure is retried (2 s,
+    // 4 s … up to a minute) while this connection lasts.
+    let seedTry = 0;
+    const seed = async (ws) => {
+      clearTimeout(this.seedTimer);
+      try {
+        const startMs = utcBucket(Math.floor(Date.now() / 1000), this.tf) * 1000;
+        const rows = await binanceGet(this.src, `${this.cfg.klines}?symbol=${this.ticker}&interval=${this.interval}&startTime=${startMs}&limit=1000`);
+        if (this.closed || ws !== this.ws) return;
+        this.remember(rows.map((k) => this.rawBar(k)));
+        this.seeded = true;
+        emitLive();
+      } catch {
+        if (this.closed || this.seeded || ws !== this.ws) return;
+        this.seedTimer = setTimeout(() => seed(ws), Math.min(2000 * 2 ** seedTry++, 60000));
+      }
+    };
     const connect = () => {
       if (this.closed) return;
       status('connecting');
       const ws = new WebSocket(`${this.cfg.ws[host]}/stream?streams=${sym}@kline_${this.interval}/${sym}@aggTrade`);
       this.ws = ws;
-      ws.onopen = () => { retry = 0; status('live'); };
+      ws.onopen = () => {
+        retry = 0;
+        status('live');
+        if (this.plan.agg && !this.seeded) { seedTry = 0; seed(ws); }
+      };
       ws.onmessage = (ev) => {
         const d = JSON.parse(ev.data).data;
         if (!d) return;
         if (d.e === 'aggTrade') tick({ time: Math.floor(d.T / 1000) + this.shift, price: +d.p, volume: +d.q });
         else if (d.k) {
           const k = d.k;
-          bars([{ time: Math.floor(k.t / 1000) + this.shift, open: +k.o, high: +k.h, low: +k.l, close: +k.c, volume: +k.v }]);
+          const raw = { time: Math.floor(k.t / 1000), open: +k.o, high: +k.h, low: +k.l, close: +k.c, volume: +k.v };
+          if (!this.plan.agg) { bars([{ ...raw, time: raw.time + this.shift }]); return; }
+          this.remember([raw]);
+          if (this.seeded) emitLive();
         }
       };
       ws.onclose = () => {
+        clearTimeout(this.seedTimer);
         if (this.closed) return;
+        this.seeded = false;
         status('reconnecting');
         host = (host + 1) % this.cfg.ws.length;
         setTimeout(connect, Math.min(1000 * 2 ** retry++, 15000));
@@ -214,6 +299,7 @@ class BinanceFeed {
 
   close() {
     this.closed = true;
+    clearTimeout(this.seedTimer);
     try { this.ws?.close(); } catch { /* ignore */ }
   }
 }
@@ -224,25 +310,22 @@ class BinanceFeed {
 
 const COINBASE_REST = 'https://api.exchange.coinbase.com';
 const COINBASE_WS = 'wss://ws-feed.exchange.coinbase.com';
-// Coinbase serves 1m/5m/15m/1h/6h/1D candles; other timeframes are built from these.
-const COINBASE_TF = {
-  '1m': [60, null], '5m': [300, null], '15m': [900, null], '30m': [900, 1800], '1h': [3600, null],
-  '2h': [3600, 7200], '4h': [3600, 14400], '1D': [86400, null], '1W': [86400, 'W'], '1M': [86400, 'M'],
-};
-
+// Coinbase serves 1m/5m/15m/1h/6h/1D candles; other timeframes are built from these (timeframes.js).
 class CoinbaseFeed {
   constructor(ticker, tf) {
     this.ticker = ticker.toUpperCase();
     this.tf = tf;
-    [this.gran, this.agg] = COINBASE_TF[tf.id];
+    const plan = basePlan(tf, 'coinbase');
+    this.gran = plan.native;
+    this.agg = plan.agg;
     this.shift = tf.daily ? 0 : localOffset();
     this.canLoadMore = true;
     this.closed = false;
     this.ws = null;
     this.timer = null;
-    // Enough 300-candle pages to show a useful number of (possibly aggregated) bars.
-    const factor = this.agg === 'W' ? 7 : this.agg === 'M' ? 30 : this.agg ? this.agg / this.gran : 1;
-    this.pages = Math.max(1, Math.min(6, Math.ceil((factor * 300) / 300)));
+    // Enough 300-candle pages to show a useful number of (possibly grouped) bars.
+    this.pages = Math.max(1, Math.min(6, plan.factor));
+    this.bucketOf = cryptoBucketOf(this);
   }
 
   async page(endSec) {
@@ -264,9 +347,9 @@ class CoinbaseFeed {
     return all.filter((b) => (seen.has(b.time) ? false : seen.add(b.time)));
   }
 
-  toChart(raw, dropPartialFirst = false) {
-    let bars = this.agg ? aggregate(raw, this.agg) : raw;
-    if (dropPartialFirst && this.agg) bars = bars.slice(1);
+  /** UTC candles → chart bars; a grouped first bar missing its start is dropped (timeframes.js). */
+  toChart(raw) {
+    const bars = this.agg ? aggregateUtc(raw, this.tf) : raw;
     return bars.map((b) => ({ ...b, time: b.time + this.shift }));
   }
 
@@ -324,7 +407,7 @@ class CoinbaseFeed {
     // Re-sync with the official candles once a minute.
     const poll = async () => {
       if (this.closed) return;
-      try { bars(this.toChart(await this.page(Math.floor(Date.now() / 1000)), true)); } catch { /* keep streaming */ }
+      try { bars(this.toChart(await this.page(Math.floor(Date.now() / 1000)))); } catch { /* keep streaming */ }
       if (!this.closed) this.timer = setTimeout(poll, 60000);
     };
     this.timer = setTimeout(poll, 60000);
@@ -428,6 +511,7 @@ class YahooFeed {
     this.quietTimer = null;
     this.unsub = null;
     this.tzOffset = 0;
+    this.sessionOpen = null; // seconds after midnight (exchange time) the session opens: see bucketOf
     this.dayVolume = null;
     this.closed = false;
     this.server = false;
@@ -452,12 +536,25 @@ class YahooFeed {
       if (name) res.meta.name = name; // company name for US stocks and ETFs
     }
     this.tzOffset = res.meta?.tzOffset || 0;
+    this.sessionOpen = Number.isFinite(res.meta?.sessionOpen) ? res.meta.sessionOpen : null;
     return res;
+  }
+
+  /**
+   * The bar a live trade starts when it's the first of a new session: that session's grid (from
+   * its open), not the last session's carried on, which for sizes that don't divide a day (25m,
+   * 7m, 5h) would land between the official bars. Null: the chart's own rule (same session).
+   */
+  bucketOf(t, lastTime) {
+    if (this.tf.daily || this.sessionOpen == null || lastTime == null) return null;
+    const start = sessionStart(t, this.sessionOpen);
+    if (lastTime >= start) return null;
+    return start + Math.floor((t - start) / this.tf.sec) * this.tf.sec;
   }
 
   async loadOlder(firstTime) {
     if (this.server || !this.canLoadMore) return [];
-    const res = await tdBars(this.ticker, this.tf, { before: firstTime });
+    const res = await tdBars(this.ticker, this.tf, { before: firstTime, open: this.sessionOpen });
     this.canLoadMore = res.full;
     return res.bars.filter((b) => b.time < firstTime);
   }
@@ -501,7 +598,9 @@ class YahooFeed {
           if (!streaming) status('polling');
           bars(res.bars);
         } else if (streaming) {
-          const res = await tdBars(this.ticker, this.tf, { outputsize: 5 });
+          // Grouped timeframes rebuild today's bars, so they ask from the day's start (exchange time).
+          const since = Math.floor((Date.now() / 1000 + this.tzOffset) / 86400) * 86400;
+          const res = await tdBars(this.ticker, this.tf, { outputsize: 5, since, open: this.sessionOpen });
           if (!this.closed) bars(res.bars);
         }
       } catch {

@@ -4,6 +4,7 @@ import * as LWC from '../vendor/lightweight-charts.mjs';
 import { THEMES, currentThemeName } from './chart-view.js';
 import { STRATEGY_DEFAULTS } from './backtest.js';
 import { $, esc, store } from './util.js';
+import { tradesCsv } from './csv.js';
 
 const money = (v, sign = false) => {
   if (v == null || !Number.isFinite(v)) return v === Infinity ? '∞' : '—';
@@ -23,9 +24,10 @@ function fmtTime(t, daily) {
 }
 
 export class StrategyTester {
-  constructor({ getView, toast }) {
+  constructor({ getView, toast, browseStrategies }) {
     this.getView = getView;
     this.toast = toast;
+    this.browseStrategies = browseStrategies;
     this.el = $('#tester');
     this.select = $('#st-select');
     this.content = $('#st-content');
@@ -118,10 +120,7 @@ export class StrategyTester {
 
     if (!entry || !entry.report) {
       this.destroyChart();
-      this.content.innerHTML = `<div class="st-empty">
-        <b>No strategy on the active chart.</b>
-        <span>Open the <b>Script editor</b>, choose <b>New ▾</b> → a strategy template (for example “EMA cross strategy”), and press <b>Ctrl+Enter</b>.
-        Results, trades and the equity curve appear here.</span></div>`;
+      this.content.innerHTML = this.emptyHtml(entry);
       return;
     }
     // Live updates only refresh what's visible, and keep the properties form untouched while editing.
@@ -292,13 +291,9 @@ export class StrategyTester {
   exportCsv() {
     const { entry } = this.current();
     if (!entry?.report) return;
-    const t = entry.times;
-    const iso = (x) => (Number.isFinite(x) ? new Date(x * 1000).toISOString().replace('.000Z', '') : '');
-    const lines = [['#', 'type', 'signal', 'entry_time', 'entry_price', 'exit_reason', 'exit_time', 'exit_price', 'qty', 'pnl', 'pnl_pct', 'runup', 'drawdown', 'bars'].join(',')];
-    entry.report.trades.forEach((tr, k) => lines.push([k + 1, tr.side, `"${tr.id.replace(/"/g, '""')}"`, iso(t[tr.entryIndex]), tr.entryPrice, tr.reason,
-      iso(t[tr.exitIndex]), tr.exitPrice, tr.qty, tr.pnl.toFixed(4), tr.pnlPct.toFixed(4), tr.runup.toFixed(4), tr.drawdown.toFixed(4), tr.bars].join(',')));
+    // Every field quoted; script text that a spreadsheet would run as a formula is kept as text (csv.js).
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
+    a.href = URL.createObjectURL(new Blob([tradesCsv(entry.report.trades, entry.times)], { type: 'text/csv' }));
     a.download = `${entry.def.name.replace(/[^\w-]+/g, '_')}_${this.view.ticker.replace(/[^\w.-]/g, '')}_${this.view.state.tf}.csv`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
@@ -342,8 +337,37 @@ export class StrategyTester {
     this.toast('Backtest updated with the new properties');
   }
 
+  /** What the panel says when there's nothing to show yet. Scripts that only draw buy/sell markers
+   *  are easy to mistake for strategies, so name them and point to real strategies. */
+  emptyHtml(entry) {
+    if (entry?.error) return `<div class="st-empty"><b>${esc(entry.def?.name || 'This strategy')} stopped with an error.</b><span>${esc(entry.error)}</span></div>`;
+    if (entry) return '<div class="st-empty"><b>Running the backtest…</b></div>';
+    const browse = this.browseStrategies ? '<button type="button" class="btn-primary st-browse" data-st="browse">Browse strategies</button>' : '';
+    const howTo = `<span>Add one from <b>Indicators → Community → Strategies</b>, or in the <b>Script editor</b> choose <b>New ▾</b> → a strategy template and press <b>Ctrl+Enter</b>.
+        Results, trades and the equity curve appear here.</span>`;
+    const live = [...(this.view?.live?.values() || [])];
+    // A script that failed before its first run has no definition yet, so it may be a strategy that never started.
+    const failed = live.filter((e) => e.error && !e.def?.strategy && e.inst.scriptId);
+    if (failed.length) {
+      const e = failed[0];
+      return `<div class="st-empty"><b>${esc(e.def?.name || e.name || 'A script on this chart')} stopped with an error.</b>
+        <span>${esc(e.error)}</span><span>Fix it in the <b>Script editor</b>; if it’s a strategy, its results appear here once it runs.</span></div>`;
+    }
+    const lookalikes = live.filter((e) => e.def?.script && !e.def.strategy).map((e) => e.def.name);
+    if (lookalikes.length) {
+      const names = lookalikes.slice(0, 3).map((n) => `“${esc(n)}”`).join(', ');
+      return `<div class="st-empty">
+        <b>No strategy on the active chart.</b>
+        <span>${names} ${lookalikes.length > 1 ? 'are indicators' : 'is an indicator'}: it can draw Buy/Sell signals, but it doesn’t place trades, so there’s nothing to backtest.
+        A strategy script starts with <code>strategy('Name', …)</code> instead of <code>indicator(…)</code>.</span>
+        ${howTo}${browse}</div>`;
+    }
+    return `<div class="st-empty"><b>No strategy on the active chart.</b>${howTo}${browse}</div>`;
+  }
+
   onClick(e) {
     const act = e.target.closest('[data-st]')?.dataset.st;
+    if (act === 'browse') { this.browseStrategies?.(); return; }
     if (act === 'csv') { this.exportCsv(); return; }
     if (act === 'reset') {
       const { entry } = this.current();
