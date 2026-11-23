@@ -1253,6 +1253,13 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (isTyping(e) || anyModal() || !activeView) return;
+  // Command+K on macOS / Ctrl+K elsewhere: use the existing symbol picker.
+  // Respect focused editors and open dialogs instead of stealing their shortcuts.
+  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    search.open('open');
+    return;
+  }
   if ((e.key === 'Delete' || e.key === 'Backspace') && activeView.deleteSelectedDrawing()) { e.preventDefault(); return; }
   if (activeView.replay && !activeView.replayPick && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
     if (e.key === 'ArrowRight') { activeView.pauseReplay(); activeView.replayStep(); e.preventDefault(); return; }
