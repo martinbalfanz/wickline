@@ -9,6 +9,7 @@ import { DrawingLayer, DRAW_COLORS } from './drawings.js';
 import { BandFill, Countdown, TradeLines } from './primitives.js';
 import { engine, scriptStore } from './scripts.js';
 import { BenchmarkFeedCache, alignBenchmarkCloses } from './benchmark-data.js';
+import { focusLatestBars } from './viewport.js';
 import { esc, formatNumber, formatVolume, uid, withAlpha } from './util.js';
 
 const DAY = 86400;
@@ -267,6 +268,8 @@ export class ChartView {
     this.lastFlush = 0;
     this.lastTickAt = 0;
     this.destroyed = false;
+    this.pendingViewportFrame = null;
+    this.needsViewportReset = false;
     this.replay = null;          // { all, idx, clock, playing, speed, timer } while replaying
     this.replayPick = false;     // choosing the replay's first candle
     this.paperLines = new Map(); // id -> { spec, line } (paper-trading positions, stops, orders)
@@ -433,7 +436,15 @@ export class ChartView {
     });
     this.q('.qt-qty').addEventListener('change', (e) => this.hooks.onQuickQty?.(this, Number(e.target.value)));
 
-    this.resizeObserver = new ResizeObserver(() => this.positionPaneLegends());
+    this.resizeObserver = new ResizeObserver(() => {
+      this.positionPaneLegends();
+      // A symbol may finish loading while this chart cell is hidden or zero-width.
+      // Wait for its first measurable size before applying the live-edge view.
+      if (this.needsViewportReset && this.bars.length && this.chart.timeScale().width() > 0) {
+        this.needsViewportReset = false;
+        focusLatestBars(this.chart.timeScale());
+      }
+    });
     this.resizeObserver.observe(this.chartEl);
     this.chartEl.addEventListener('mouseup', () => requestAnimationFrame(() => this.positionPaneLegends()));
 
@@ -1059,6 +1070,7 @@ export class ChartView {
     this.feed = null;
     for (const e of this.compareEntries.values()) e.feed?.close();
     this.benchmarkFeeds.clear();
+    if (this.pendingViewportFrame !== null) cancelAnimationFrame(this.pendingViewportFrame);
     for (const e of this.live.values()) clearTimeout(e.timer);
     clearTimeout(this.flushTimer);
     this.resizeObserver.disconnect();
@@ -1297,14 +1309,33 @@ export class ChartView {
    * different price) would otherwise open into empty space.
    */
   resetView() {
-    const n = this.bars.length;
     const series = [this.main];
     for (const entry of this.live.values()) for (const { api } of entry.series) series.push(api);
     for (const e of this.compareEntries.values()) if (e.series) series.push(e.series);
     for (const s of series) {
       try { s.priceScale().applyOptions({ autoScale: true }); } catch { /* series without a scale */ }
     }
-    this.chart.timeScale().setVisibleLogicalRange({ from: Math.max(-5, n - 150), to: n + 10 });
+
+    // setVisibleLogicalRange() uses logical indices which may still reflect the
+    // previous symbol or a chart width that has not settled yet. Anchor to the
+    // actual right edge of the new data, regardless of how many candles exist.
+    const scale = this.chart.timeScale();
+    focusLatestBars(scale);
+    this.needsViewportReset = scale.width() <= 0;
+
+    // An auto-sized chart may lay out after data is assigned. Reconfirm the
+    // latest-bar position on the next frame, but never during a later load.
+    if (this.pendingViewportFrame !== null) cancelAnimationFrame(this.pendingViewportFrame);
+    const gen = this.loadGen;
+    this.pendingViewportFrame = requestAnimationFrame(() => {
+      this.pendingViewportFrame = null;
+      if (this.destroyed || gen !== this.loadGen || !this.bars.length || this.replay) return;
+      const current = this.chart.timeScale();
+      if (current.width() > 0) {
+        focusLatestBars(current);
+        this.needsViewportReset = false;
+      }
+    });
   }
 
   /** Start time of the bar that a tick at chart time t belongs to, given the last bar's start. */
