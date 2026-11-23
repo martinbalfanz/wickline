@@ -401,6 +401,31 @@ app.whenReady().then(async () => {
       await wait(2500);
       return run(`[...document.querySelectorAll('#search-results .sr-row')].map((r) => ({ t: r.querySelector('.sr-ticker').textContent, src: r.querySelector('.sr-badge')?.textContent }))`);
     };
+    // Command+K (macOS) and Ctrl+K (Windows/Linux) use the existing symbol picker.
+    for (const modifier of ['metaKey', 'ctrlKey']) {
+      const shortcut = await run(`(() => {
+        const ev = new KeyboardEvent('keydown', { key: 'k', ${modifier}: true, bubbles: true, cancelable: true });
+        const handled = !document.dispatchEvent(ev);
+        return { handled, open: !document.querySelector('#search-modal').hidden,
+          focused: document.activeElement === document.querySelector('#search-input') };
+      })()`);
+      check(modifier === 'metaKey' ? 'Cmd+K focuses symbol search' : 'Ctrl+K focuses symbol search',
+        shortcut.handled && shortcut.open && shortcut.focused, JSON.stringify(shortcut));
+      await run(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+      check('Escape closes shortcut-opened search', await run(`document.querySelector('#search-modal').hidden`));
+    }
+    // Do not reset an existing input/editor when Command+K is pressed while typing.
+    await run(`document.querySelector('#symbol-btn').click()`);
+    const preserved = await run(`(() => {
+      const input = document.querySelector('#search-input');
+      input.value = 'MSFT';
+      input.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'k', metaKey: true, bubbles: true, cancelable: true,
+      }));
+      return input.value === 'MSFT' && document.activeElement === input;
+    })()`);
+    check('Cmd+K does not reset an active text input', preserved);
+    await run(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
     await run(`document.querySelector('#symbol-btn').click()`);
     await wait(300);
     check('search has no category selector', !(await run(`!!document.querySelector('#search-tabs')`)));
