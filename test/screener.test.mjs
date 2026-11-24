@@ -156,5 +156,24 @@ test('market cap formatting', () => {
   assert.equal(fmtCap(null), '—');
 });
 
+test('other markets: the size filter works in dollars, caps show in their currency', () => {
+  const rows = [
+    { s: '7203.T', p: 3000, c: 1, m: 4e13, v: 1e7, sig: [] }, // about $260B at 0.0065
+    { s: '9999.T', p: 500, c: 2, m: 1e11, v: 1e6, sig: [] }, // about $650M
+  ];
+  assert.deepEqual(applyScreen(rows, { idea: 'all', cap: 2e9, fx: 0.0065 }).map((r) => r.s), ['7203.T']);
+  assert.deepEqual(applyScreen(rows, { idea: 'all', cap: 2e9, fx: null }).map((r) => r.s), ['7203.T', '9999.T']);
+  assert.match(fmtCap(4e13, 'JPY'), /40/);
+  assert.match(fmtCap(4e13, 'JPY'), /¥|JP/);
+  assert.equal(fmtCap(2.5e12), '$2.50T');
+});
+
+test('no volume yet means unknown, not zero relative volume', () => {
+  const r = buildRow({ s: '005930.KS', p: 100 }, { regularMarketPrice: 100, regularMarketVolume: 0, averageDailyVolume10Day: 1e6 });
+  assert.equal(r.v, null);
+  assert.equal(r.rv, null);
+  assert.equal(r.av, 1e6);
+});
+
 console.log(failed ? `\n${failed} failed` : '\nall passed');
 process.exitCode = failed ? 1 : 0;

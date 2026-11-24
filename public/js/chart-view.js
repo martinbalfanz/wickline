@@ -5,7 +5,7 @@
 import * as LWC from '../vendor/lightweight-charts.mjs';
 import { createFeed, tfById, parseSymbol, displayTicker, isCryptoSymbol, sourceName } from './datafeed.js';
 import { tfIdOf } from './timeframes.js';
-import { INDICATORS, PALETTE, UP, DOWN, defaultParams, indicatorLabel, heikinAshi, heikinAshiAt } from './indicators.js';
+import { INDICATORS, PALETTE, UP, DOWN, defaultParams, indicatorLabel, optionLabel, heikinAshi, heikinAshiAt } from './indicators.js';
 import { DrawingLayer, DRAW_COLORS } from './drawings.js';
 import { BandFill, Countdown, TradeLines } from './primitives.js';
 import { engine, scriptStore } from './scripts.js';
@@ -14,18 +14,16 @@ import { dashboardHtml, entryDashboardChanged } from './indicator-dashboard.js';
 import { focusLatestBars } from './viewport.js';
 import { canRunCommunity } from './community.js';
 import { LIMITS, coerceParams, safeColor } from './script-sanitize.js';
-import { esc, formatNumber, formatVolume, uid, withAlpha } from './util.js';
+import { esc, formatNumber, formatVolume, uid, withAlpha, fixed, decimalComma } from './util.js';
+import { t, lang, locale } from './i18n.js';
 
 const DAY = 86400;
 const FLUSH_MS = 100;        // live redraws at most ~10 times per second per chart
 const SCRIPT_MIN_MS = 250;   // user scripts re-run at most ~4 times per second per chart
 const COMPARE_COLORS = ['#FF9800', '#E040FB', '#00BCD4', '#FFEB3B', '#4CAF50', '#F06292'];
 
-export const CHART_TYPES = [
-  ['candles', 'Candles'], ['hollow', 'Hollow candles'], ['heikin', 'Heikin Ashi'], ['bars', 'Bars'],
-  ['line', 'Line'], ['linemarkers', 'Line with markers'], ['stepline', 'Step line'], ['area', 'Area'],
-  ['baseline', 'Baseline'], ['columns', 'Columns'],
-];
+export const CHART_TYPES = ['candles', 'hollow', 'heikin', 'bars', 'line', 'linemarkers', 'stepline', 'area', 'baseline', 'columns']
+  .map((id) => [id, t(`chart.type.${id}`)]);
 
 export const THEMES = {
   dark: {
@@ -153,6 +151,14 @@ const ICON_CUT = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M12 3
 export const REPLAY_SPEEDS = [[0.5, '0.5×'], [1, '1×'], [2, '2×'], [3, '3×'], [5, '5×'], [10, '10×']];
 const ICON_BELL = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20a2 2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
 
+/**
+ * A series' price format with p decimals. Lightweight Charts writes its scale with a dot, so where
+ * the UI language writes a decimal comma (es, pt-BR) the scale and crosshair use one too.
+ */
+const priceFormatOf = (p) => (decimalComma
+  ? { type: 'custom', minMove: 1 / 10 ** p, formatter: (v) => fixed(v, p) }
+  : { type: 'price', precision: p, minMove: 1 / 10 ** p });
+
 const sameBar = (a, b) => a.open === b.open && a.high === b.high && a.low === b.low && a.close === b.close && a.volume === b.volume;
 
 function plotColor(inst, plot) {
@@ -231,9 +237,9 @@ export class ChartView {
       <div class="legend">
         <div class="lg-title"><span class="lg-name"></span><span class="lg-meta"></span>
           <div class="qt" hidden>
-            <button class="qt-sell" data-qt="sell" title="One click: sell this quantity at the market now"><small>Sell</small><b class="qt-px">—</b></button>
-            <input class="qt-qty" type="number" min="0" step="any" aria-label="Quantity" title="Quantity">
-            <button class="qt-buy" data-qt="buy" title="One click: buy this quantity at the market now"><small>Buy</small><b class="qt-px">—</b></button>
+            <button class="qt-sell" data-qt="sell" title="${t('chart.qtSellTitle')}"><small>${t('common.sell')}</small><b class="qt-px">—</b></button>
+            <input class="qt-qty" type="number" min="0" step="any" aria-label="${t('chart.quantity')}" title="${t('chart.quantity')}">
+            <button class="qt-buy" data-qt="buy" title="${t('chart.qtBuyTitle')}"><small>${t('common.buy')}</small><b class="qt-px">—</b></button>
           </div>
         </div>
         <div class="lg-ohlc"></div>
@@ -241,30 +247,30 @@ export class ChartView {
       </div>
       <div class="pane-legends"></div>
       <div class="draw-bar" hidden>
-        <div class="db-colors">${DRAW_COLORS.map((c) => `<button data-color="${c}" style="--c:${c}" aria-label="Color ${c}"></button>`).join('')}</div>
-        <input class="db-text" placeholder="Text" maxlength="80" hidden>
-        <button data-db="alert" title="Create an alert at this price" hidden>${ICON_BELL}</button>
-        <button data-db="delete" title="Delete (Del)">${ICON_TRASH}</button>
+        <div class="db-colors">${DRAW_COLORS.map((c) => `<button data-color="${c}" style="--c:${c}" aria-label="${t('chart.colorAria', { color: c })}"></button>`).join('')}</div>
+        <input class="db-text" placeholder="${t('draw.tool.text')}" maxlength="80" hidden>
+        <button data-db="alert" title="${t('chart.alertAtPrice')}" hidden>${ICON_BELL}</button>
+        <button data-db="delete" title="${t('chart.deleteDel')}">${ICON_TRASH}</button>
       </div>
       <div class="rp-pick" hidden><div class="rp-dim"></div></div>
       <div class="rp-banner" hidden>
-        <span>Click the candle where the replay starts</span>
-        <button data-rp="random" class="tb-btn">Random</button>
-        <input class="rp-date" type="datetime-local" aria-label="Start date">
-        <button data-rp="date" class="tb-btn">Go</button>
-        <button data-rp="cancel" class="tb-btn">Cancel</button>
+        <span>${t('chart.replay.pickHint')}</span>
+        <button data-rp="random" class="tb-btn">${t('chart.replay.random')}</button>
+        <input class="rp-date" type="datetime-local" aria-label="${t('chart.replay.startDate')}">
+        <button data-rp="date" class="tb-btn">${t('chart.replay.go')}</button>
+        <button data-rp="cancel" class="tb-btn">${t('common.cancel')}</button>
       </div>
       <div class="replay-bar" hidden>
-        <button data-rp="pick" title="Choose another start" aria-label="Choose another start">${ICON_CUT}</button>
-        <button data-rp="play" title="Play / pause (Shift+↓)" aria-label="Play or pause">${ICON_PLAY}</button>
-        <button data-rp="step" title="Next candle (Shift+→)" aria-label="Next candle">${ICON_STEP}</button>
-        <select data-rp="speed" title="Candles per second" aria-label="Replay speed">${REPLAY_SPEEDS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>
+        <button data-rp="pick" title="${t('chart.replay.pickAgain')}" aria-label="${t('chart.replay.pickAgain')}">${ICON_CUT}</button>
+        <button data-rp="play" title="${t('chart.replay.playTitle')}" aria-label="${t('chart.replay.playAria')}">${ICON_PLAY}</button>
+        <button data-rp="step" title="${t('chart.replay.stepTitle')}" aria-label="${t('chart.replay.stepAria')}">${ICON_STEP}</button>
+        <select data-rp="speed" title="${t('chart.replay.speedTitle')}" aria-label="${t('chart.replay.speedAria')}">${REPLAY_SPEEDS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>
         <span class="rp-time"></span>
-        <button data-rp="exit" class="rp-exit" title="Back to the live chart">Exit replay</button>
+        <button data-rp="exit" class="rp-exit" title="${t('chart.replay.exitTitle')}">${t('chart.replay.exit')}</button>
       </div>
       <div class="cell-tools">
-        <button data-cell="max" title="Maximize / restore (Alt+Enter)" aria-label="Maximize or restore">${ICON_MAX}</button>
-        <button data-cell="pop" title="Open in a new window" aria-label="Open in a new window">${ICON_POP}</button>
+        <button data-cell="max" title="${t('chart.maxTitle')}" aria-label="${t('chart.maxAria')}">${ICON_MAX}</button>
+        <button data-cell="pop" title="${t('chart.popout')}" aria-label="${t('chart.popout')}">${ICON_POP}</button>
       </div>
       <div class="overlay loading" hidden><div class="spinner"></div></div>
       <div class="overlay error" hidden></div>`;
@@ -274,6 +280,8 @@ export class ChartView {
     this.chart = LWC.createChart(this.chartEl, {
       ...chartOptions(currentTheme),
       autoSize: true,
+      // Month names and the crosshair's date in the UI language ('23 Nov '26'; 2026-11-23 in zh/ja).
+      localization: { locale, ...(lang === 'en' ? {} : { dateFormat: 'yyyy-MM-dd' }) },
       rightPriceScale: { borderColor: THEMES[currentTheme].border, scaleMargins: { top: 0.1, bottom: 0.12 } },
       timeScale: { borderColor: THEMES[currentTheme].border, rightOffset: 10, barSpacing: 8, timeVisible: true, secondsVisible: false },
     });
@@ -332,15 +340,14 @@ export class ChartView {
   mainValueAt(i) { return this.state.chartType === 'heikin' && this.ha[i] ? this.ha[i].close : this.bars[i]?.close; }
 
   priceFormat() {
-    const p = this.meta.precision ?? 2;
-    return { type: 'price', precision: p, minMove: 1 / 10 ** p };
+    return priceFormatOf(this.meta.precision ?? 2);
   }
 
   formatPrice(v) { return formatNumber(v, this.meta.precision ?? 2); }
 
   indicatorFormat(def) {
     if (def.format === 'volume') return { type: 'custom', formatter: formatVolume, minMove: 1 };
-    if (def.precision != null) return { type: 'price', precision: def.precision, minMove: 1 / 10 ** def.precision };
+    if (def.precision != null) return priceFormatOf(def.precision);
     return this.priceFormat();
   }
 
@@ -746,8 +753,7 @@ export class ChartView {
     // app's server, its worker has no CSP to cut it off from the internet (see community.js).
     const blocked = script?.community && !canRunCommunity();
     if (!script || blocked) {
-      entry.error = blocked ? 'Community scripts run only in the desktop app, where they are cut off from the internet.'
-        : 'This script was deleted. Remove it from the chart.';
+      entry.error = blocked ? t('chart.err.communityDesktopOnly') : t('chart.err.scriptDeleted');
       this.removeEntrySeries(entry);
       entry.sig = null;
       this.buildLegend();
@@ -772,8 +778,8 @@ export class ChartView {
       .catch((err) => {
         if (this.destroyed || this.live.get(entry.inst.id) !== entry) return;
         if (err.restarted) { entry.again = true; return; } // another script hung; just try again
-        entry.halted = /^Stopped/.test(err.message);
-        entry.error = err.line ? `Line ${err.line}: ${err.message}` : err.message;
+        entry.halted = !!err.halted; // timed out (scripts.js); the message is in the UI language
+        entry.error = err.line ? t('chart.err.scriptLine', { line: err.line, message: err.message }) : err.message;
         this.buildLegend();
       })
       .finally(() => {
@@ -843,7 +849,10 @@ export class ChartView {
       this.main.attachPrimitive(entry.tradeLines);
       entry.tradeTarget = this.main;
     }
-    const SHORT = { 'Take profit': 'TP', 'Stop loss': 'SL', Stop: 'Stop', 'Trailing stop': 'Trail', Reverse: 'Rev', Close: 'Close' };
+    const SHORT = {
+      'Take profit': 'TP', 'Stop loss': 'SL', Stop: t('chart.mk.stop'), 'Trailing stop': t('chart.mk.trail'),
+      Reverse: t('chart.mk.reverse'), Close: t('chart.mk.close'),
+    };
     const markers = report.markers.filter((m) => times[m.i] != null).map((m) => {
       const long = m.side === 'long';
       if (m.kind === 'entry') {
@@ -1001,7 +1010,7 @@ export class ChartView {
     this.alertLines = this.alertList
       .filter((a) => a.active && a.symbol === this.state.symbol)
       .map((a) => this.main.createPriceLine({
-        price: a.price, color: '#FF9800', lineWidth: 1, lineStyle: LWC.LineStyle.Dashed, axisLabelVisible: true, title: 'Alert',
+        price: a.price, color: '#FF9800', lineWidth: 1, lineStyle: LWC.LineStyle.Dashed, axisLabelVisible: true, title: t('chart.alertLine'),
       }));
   }
 
@@ -1019,7 +1028,7 @@ export class ChartView {
     if (!this.main) return;
     const opts = this.ext && {
       price: this.ext.price, color: CANDLES.accent, lineWidth: 1, lineStyle: LWC.LineStyle.Dashed,
-      axisLabelVisible: true, title: this.ext.label,
+      axisLabelVisible: true, title: t(`chart.ext.${this.ext.label.toLowerCase()}Short`),
     };
     if (this.extLine && opts) this.extLine.applyOptions(opts);
     else {
@@ -1196,7 +1205,7 @@ export class ChartView {
     try {
       const res = await f.loadInitial();
       if (gen !== this.loadGen) { f.close(); return; }
-      if (!res.bars?.length) throw new Error('No data for this symbol on this timeframe.');
+      if (!res.bars?.length) throw new Error(t('chart.err.noData'));
       this.meta = { tzOffset: 0, ...res.meta };
       let bars = res.bars;
       if (this.replay) {
@@ -1278,11 +1287,12 @@ export class ChartView {
     el.hidden = !msg;
     if (!msg) return;
     const needsKey = code === 'NEEDS_KEY';
-    el.innerHTML = `<div class="error-card"><b>${needsKey ? `${esc(this.ticker)} needs a free data key here` : `Couldn't load ${esc(this.ticker)}`}</b>
+    const ticker = esc(this.ticker);
+    el.innerHTML = `<div class="error-card"><b>${needsKey ? t('chart.err.needsKey', { ticker }) : t('chart.err.couldNotLoad', { ticker })}</b>
       <span>${esc(msg)}</span>
       <div class="error-actions">
-        ${needsKey ? '<button class="btn-primary" data-err="key">Connect free stock data</button>' : ''}
-        <button class="${needsKey ? 'btn-ghost' : 'btn-primary'}" data-err="search">${needsKey ? 'Chart crypto instead' : 'Search another symbol'}</button>
+        ${needsKey ? `<button class="btn-primary" data-err="key">${t('chart.err.connectKey')}</button>` : ''}
+        <button class="${needsKey ? 'btn-ghost' : 'btn-primary'}" data-err="search">${needsKey ? t('chart.err.chartCrypto') : t('chart.err.searchAnother')}</button>
       </div></div>`;
     el.querySelector('[data-err="search"]').addEventListener('click', () => this.hooks.onSearch?.(this));
     el.querySelector('[data-err="key"]')?.addEventListener('click', () => this.hooks.onSettings?.(this));
@@ -1496,7 +1506,7 @@ export class ChartView {
   /** A random start, leaving some history before it and some candles to play after it. */
   replayRandom() {
     const n = this.bars.length;
-    if (n < 3) { this.hooks.onReplay?.(this, 'notice', 'Not enough history on this chart to replay.'); return; }
+    if (n < 3) { this.hooks.onReplay?.(this, 'notice', t('chart.replay.notEnough')); return; }
     const lo = Math.max(1, Math.min(100, Math.floor(n * 0.2)));
     const hi = Math.max(lo + 1, n - Math.min(20, Math.floor(n * 0.2)) - 1);
     this.startReplay(Math.min(n - 2, lo + Math.floor(Math.random() * (hi - lo))));
@@ -1515,7 +1525,7 @@ export class ChartView {
     if (gen !== this.loadGen || !this.replayPick) return;
     let i = this.indexAtOrBefore(target);
     if (i < 0) {
-      this.hooks.onReplay?.(this, 'notice', 'That date is further back than this chart\'s history goes; starting at the earliest candle.');
+      this.hooks.onReplay?.(this, 'notice', t('chart.replay.tooFarBack'));
       i = 0;
     }
     this.startReplay(i);
@@ -1630,7 +1640,7 @@ export class ChartView {
     let i = bars.length - 1;
     while (i >= 0 && bars[i].time - tz + this.tf.sec > clock + 1) i--;
     if (i < 0) {
-      this.endReplay(`This chart has no ${this.tf.label} candles that far back, so it's showing live data.`);
+      this.endReplay(t('chart.replay.noCandles', { tf: this.tf.label }));
       return;
     }
     this.pauseReplay();
@@ -1738,7 +1748,7 @@ export class ChartView {
       const buy = f.side === 'buy';
       markers.push({
         time: this.bars[i].time, position: buy ? 'belowBar' : 'aboveBar', shape: buy ? 'arrowUp' : 'arrowDown',
-        color: buy ? '#4FA3F7' : '#EC5246', text: `${buy ? 'Buy' : 'Sell'} ${+f.qty.toPrecision(6)}`,
+        color: buy ? '#4FA3F7' : '#EC5246', text: t(buy ? 'chart.fillBuy' : 'chart.fillSell', { qty: +f.qty.toPrecision(6) }),
       });
     }
     markers.sort((a, b) => a.time - b.time);
@@ -1773,7 +1783,7 @@ export class ChartView {
 
   entryLabel(entry) {
     if (entry.def) return indicatorLabel(entry.def, entry.inst);
-    return entry.name || scriptStore.get(entry.inst.scriptId)?.name || 'Script';
+    return entry.name || scriptStore.get(entry.inst.scriptId)?.name || t('chart.script');
   }
 
   buildLegend() {
@@ -1787,7 +1797,7 @@ export class ChartView {
       row.dataset.cmp = e.c.symbol;
       row.innerHTML = `<i class="lg-dot" style="background:${e.c.color}"></i><span class="lg-name">${esc(displayTicker(e.c.symbol))}</span>
         <span class="lg-vals">${e.error ? `<span class="lg-err">${esc(e.error)}</span>` : ''}</span>
-        <span class="lg-actions"><button data-act="rm-cmp" title="Remove" aria-label="Remove">${ICON_X}</button></span>`;
+        <span class="lg-actions"><button data-act="rm-cmp" title="${t('common.remove')}" aria-label="${t('common.remove')}">${ICON_X}</button></span>`;
       overlayBox.append(row);
       e.row = row;
     }
@@ -1799,9 +1809,9 @@ export class ChartView {
       row.innerHTML = `<span class="lg-name">${esc(this.entryLabel(entry))}</span>
         ${customPanel}<span class="lg-vals">${entry.error ? `<span class="lg-err">⚠ ${esc(entry.error)}</span>` : ''}</span>
         <span class="lg-actions">
-          ${entry.script ? `<button data-act="code" title="Edit script" aria-label="Edit script">${ICON_CODE}</button>` : ''}
-          <button data-act="settings" title="Settings" aria-label="Settings">${ICON_GEAR}</button>
-          <button data-act="remove" title="Remove" aria-label="Remove">${ICON_X}</button>
+          ${entry.script ? `<button data-act="code" title="${t('chart.editScript')}" aria-label="${t('chart.editScript')}">${ICON_CODE}</button>` : ''}
+          <button data-act="settings" title="${t('common.settings')}" aria-label="${t('common.settings')}">${ICON_GEAR}</button>
+          <button data-act="remove" title="${t('common.remove')}" aria-label="${t('common.remove')}">${ICON_X}</button>
         </span>`;
       entry.row = row;
       entry.paneLegend = null;
@@ -1851,13 +1861,13 @@ export class ChartView {
       <span>H<b class="${cls}">${f(b.high)}</b></span>
       <span>L<b class="${cls}">${f(b.low)}</b></span>
       <span>C<b class="${cls}">${f(b.close)}</b></span>
-      <b class="${chg >= 0 ? 'up' : 'down'}">${sign}${f(chg)} (${sign}${pct.toFixed(2)}%)</b>`;
+      <b class="${chg >= 0 ? 'up' : 'down'}">${sign}${f(chg)} (${sign}${fixed(pct, 2)}%)</b>`;
     if (this.ext) {
       const ref = bars[bars.length - 1].close; // last regular-session close
       const d = ((this.ext.price - ref) / ref) * 100;
-      const name = { Pre: 'Pre-market', Post: 'After hours', Overnight: 'Overnight' }[this.ext.label];
+      const name = t(`chart.ext.${this.ext.label.toLowerCase()}`); // Pre-market, After hours, Overnight
       ohlc.innerHTML += `<span class="lg-ext">${name}<b>${f(this.ext.price)}</b>
-        <b class="${d >= 0 ? 'up' : 'down'}">${d >= 0 ? '+' : ''}${d.toFixed(2)}%</b></span>`;
+        <b class="${d >= 0 ? 'up' : 'down'}">${d >= 0 ? '+' : ''}${fixed(d, 2)}%</b></span>`;
     }
 
     for (const entry of this.live.values()) {
@@ -1874,7 +1884,7 @@ export class ChartView {
       const s = entry.report?.summary;
       if (s) {
         const pct = s.netProfitPct;
-        html += `<span class="lg-strat">${s.trades} trades · <b class="${pct >= 0 ? 'up' : 'down'}">${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%</b></span>`;
+        html += `<span class="lg-strat">${t('chart.stratTrades', { n: s.trades })} · <b class="${pct >= 0 ? 'up' : 'down'}">${pct >= 0 ? '+' : ''}${fixed(pct, 2)}%</b></span>`;
       }
       entry.row.querySelector('.lg-vals').innerHTML = html;
     }
@@ -1897,7 +1907,7 @@ export class ChartView {
       const v = inst.params[p.key] ?? p.def;
       const key = esc(p.key);
       if (p.type === 'select') {
-        return `<select data-param="${key}">${(p.options || []).map((o) => `<option${o === v ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+        return `<select data-param="${key}">${(p.options || []).map((o) => `<option value="${esc(o)}"${o === v ? ' selected' : ''}>${esc(optionLabel(p, o))}</option>`).join('')}</select>`;
       }
       if (p.type === 'bool') return `<input type="checkbox" data-param="${key}"${v ? ' checked' : ''}>`;
       if (p.type === 'text') return `<input type="text" data-param="${key}" value="${esc(v)}">`;
@@ -1907,13 +1917,13 @@ export class ChartView {
       <div class="pop-title">${esc(def.name)}</div>
       ${def.params.map((p) => `<label class="pop-field"><span>${esc(p.label)}</span>${field(p)}</label>`).join('')}
       ${colorPlots.map((p) => `
-        <label class="pop-field"><span>${esc(p.title)} color</span>
+        <label class="pop-field"><span>${t('chart.plotColor', { title: esc(p.title) })}</span>
           <input type="color" data-color="${esc(p.key)}" value="${/^#[0-9a-f]{6}$/i.test(plotColor(inst, p)) ? plotColor(inst, p) : '#4FA3F7'}">
         </label>`).join('')}
-      ${!def.params.length && !colorPlots.length ? '<p class="pop-note">No settings for this indicator.</p>' : ''}
+      ${!def.params.length && !colorPlots.length ? `<p class="pop-note">${t('chart.noSettings')}</p>` : ''}
       <div class="pop-actions">
-        <button class="btn-ghost" data-act="defaults">Defaults</button>
-        <button class="btn-primary" data-act="close">Done</button>
+        <button class="btn-ghost" data-act="defaults">${t('chart.defaults')}</button>
+        <button class="btn-primary" data-act="close">${t('common.done')}</button>
       </div>`;
     el.hidden = false;
     settings.view = this;

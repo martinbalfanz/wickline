@@ -1,6 +1,6 @@
 # Wickline
 
-English · [简体中文](README.zh-CN.md) · [日本語](README.ja.md)
+English · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Español](README.es.md) · [Português (Brasil)](README.pt-BR.md)
 
 A free, open-source charting platform.
 - Live crypto, stocks, ETFs, indices, forex and futures, on any timeframe (2m, 45m, 3H…).
@@ -25,11 +25,12 @@ A free, open-source charting platform.
 - **Curated lists:** 283 hand-picked instruments in 12 groups (world indices, European and Asian stocks, forex, commodities, futures, bond yields…).
 - **Live screeners:** top gainers, losers, most active, trending, and more.
 - **Symbol search:** one box searches every source at once (stocks, funds, indices, forex, futures and every crypto exchange). Each result shows its exchange and where its data comes from (Yahoo, Binance, Binance Futures, Coinbase).
+- **Network proxy** for places where Yahoo, Binance or GitHub are blocked: the desktop app uses your system proxy, or an HTTP or SOCKS5 proxy you set (Clash, v2rayN…). Every data source, news and the update check go through it, and a change applies at once. See [Using a proxy](#using-a-proxy).
 
 **Screener: find stocks to trade**
-- Scans the ~3,000 largest US stocks, refreshed every minute.
+- Scans the ~3,000 largest US stocks, refreshed every minute, or the largest companies of any of the heatmap's 17 other stock markets (Europe, Japan, China, Hong Kong, Korea, Taiwan, India, Canada, Australia, Brazil). Abroad, stocks show the codes local traders use (7203, 601398, 00700) and market caps in their own currency.
 - **Ready-made ideas, one click each:** top gainers and losers, unusual volume, 52-week highs and breakouts, lows and breakdowns, strong uptrends, downtrends, oversold and overbought (RSI), gaps, golden and death crosses, earnings this week.
-- **Filters:** market cap, average volume, sector, minimum price. Sort by any column.
+- **Filters:** market cap (in dollars, in every market), average volume, sector, minimum price. Sort by any column.
 - **Signals on every stock:** relative volume, gap, distance from the 50- and 200-day averages and the 52-week high, RSI, 1-month change, next earnings date.
 - **Market insights:** how many stocks are up or down, the share above their 50- and 200-day averages, new highs and lows, and today's best and worst sectors.
 - Click a row to open its chart, then flip through the list with the ↑ ↓ keys.
@@ -40,6 +41,7 @@ A free, open-source charting platform.
   - **United States:** the top 100 to 1,000 stocks from the screener's scan.
   - **17 other stock markets:** the United Kingdom, Germany, France, the Netherlands, Italy, Spain, Switzerland, Sweden, Japan, China, Hong Kong, South Korea, Taiwan, India, Canada, Australia and Brazil, up to 500 companies each. Each market shows its own companies only, not foreign companies' secondary lines (Apple in Frankfurt). They're sized by market cap in their own currency, and tooltips show prices and caps in that currency (London prices in pence).
   - **Crypto:** the top coins by market cap (from CoinGecko), grouped by category: payments, layer 1 and 2, DeFi, meme coins, AI, exchange tokens and more. Stablecoins, wrapped and staked copies (WBTC, stETH), tokenized stocks and funds, and gold tokens are left out. Changes are over rolling 24 hours, 7, 30 and 90 days and a year, and the colour scale is twice as wide. A coin opens on its Binance USDT pair, or on Yahoo when Binance doesn't list it.
+- Tiles show the codes traders use in that market (601398 rather than 601398.SS, 00700 in Hong Kong, INVE B in Stockholm) and, on large tiles, the company's name.
 - Hover a tile for its price and changes, click it to open its chart, or click a sector's name to zoom in on it. A period a market has no data for is greyed out.
 
 **Options**
@@ -82,7 +84,7 @@ A free, open-source charting platform.
   - **Sync across charts** (Layout menu): symbol, timeframe and crosshair, including pop-out windows. Change one chart and the rest follow.
   - Maximize any chart, or pop it out into its own window.
 - **Chart types:** candles, hollow candles, Heikin Ashi, bars, line, line with markers, step line, area, baseline, columns.
-- **Timeframes:** any number of minutes or hours, like TradingView: 1m, 2m, 3m, 10m, 45m, 90m, 1H, 3H, 6H, 12H… plus D, W and M, on every source (built from the exchange's own candles where it has no such interval, live too).
+- **Timeframes:** any number of minutes or hours: 1m, 2m, 3m, 10m, 45m, 90m, 1H, 3H, 6H, 12H… plus D, W and M, on every source (built from the exchange's own candles where it has no such interval, live too).
   - Star your favourites in the ▾ menu next to the timeframe buttons to keep them in the header.
   - Or type a number on the chart (45, 240, 4h, 1D) and press Enter.
 - **Display:**
@@ -146,6 +148,7 @@ A free, open-source charting platform.
 - Shareable links, such as `/#s=YAHOO:AAPL&tf=1D`.
 - Save the chart as a PNG.
 - Keyboard shortcuts.
+- **In seven languages:** English, Simplified and Traditional Chinese (简体中文, 繁體中文), Japanese (日本語), Korean (한국어), Spanish (Español) and Brazilian Portuguese (Português). The UI follows your system's language; change it under ⚙ (Data sources) → **Language**.
 - Works on phones.
 
 ## Get it
@@ -167,6 +170,17 @@ The app isn't code-signed, because signing certificates cost money, so the first
 - **macOS says the app "is damaged"** (versions before 0.1.6 did this on Apple silicon): run `xattr -cr /Applications/Wickline.app` in Terminal. That removes the "downloaded from the internet" flag.
 
 The app runs a small data server inside itself. It listens only on your own computer (`127.0.0.1`), and stock data comes from Yahoo over your own connection.
+
+### Using a proxy
+
+Where Yahoo, Binance or GitHub are blocked (in China, for example), send the app's connections through a proxy: ⚙ (Data sources) → **Network proxy**.
+- **Use system proxy** (the default): whatever your system's proxy settings say, e.g. a VPN or proxy app's "system proxy" switch.
+- **Manual:** an HTTP proxy as `host:port`, e.g. `127.0.0.1:7890` for Clash's local port, or a SOCKS5 proxy as `socks5://127.0.0.1:1080`. Proxies that need a password aren't supported.
+- **Off:** connect directly.
+
+It covers everything the app fetches: Yahoo, Nasdaq, Binance, Coinbase, CoinGecko, Deribit, news, community scripts and the update check. The app's own server on `127.0.0.1` is never proxied.
+
+With `npm start`, set the proxy for the server in `WICKLINE_PROXY` (or the usual `HTTPS_PROXY` / `ALL_PROXY`), e.g. `WICKLINE_PROXY=socks5://127.0.0.1:1080 npm start`. The page itself, like the website version, uses your browser's proxy settings.
 
 **From source.** Requires [Node.js](https://nodejs.org/) 22+.
 
@@ -202,7 +216,7 @@ npx serve public
 
 ## Data sources
 
-**The desktop app and `npm start` need no API key.** They come with a small built-in server (`server.mjs`, Node.js 22+, no dependencies). It reads Yahoo Finance and Nasdaq for stocks, and the exchanges' public feeds for crypto.
+**The desktop app and `npm start` need no API key.** They come with a small built-in server (`server.mjs`, Node.js 22+, no dependencies unless it goes through a [proxy](#using-a-proxy)). It reads Yahoo Finance and Nasdaq for stocks, and the exchanges' public feeds for crypto.
 - **Yahoo** supplies stocks, ETFs, indices, forex and futures: history, live trades, screeners, news, the economic calendar and earnings.
 - **Binance, Binance Futures and Coinbase** supply crypto, with every trade in real time.
 - **CoinGecko** (its free API, no key) supplies the crypto heatmap's market caps and changes, fetched at most every 3 minutes.
@@ -302,16 +316,18 @@ marker(ta.crossover(fast, slow), { position: 'below', shape: 'up', color: '#0899
 marker(ta.crossunder(fast, slow), { position: 'above', shape: 'down', color: '#F23645', text: 'Sell' });
 ```
 
-### Cross-symbol indicator extensions
+### Optional cross-symbol indicators
 
-Custom scripts can request another instrument's aligned closes with `compareClose('YAHOO:QQQ')`. The application
-loads referenced series through a hidden, shared feed (up to four per script), without adding
-an on-chart comparison. Unmatched bars are `NaN`; no last-known-price forward-fill is applied.
+Custom scripts can request aligned benchmark closes using `compareClose('YAHOO:QQQ')`, loading
+referenced series through shared hidden feeds (up to four per script). Unmatched candles
+remain `NaN`; they are not silently forward-filled.
 
-Use `dashboard({ status: 'LEADING', tone: 'positive', metrics: [{ label: '1M', value: '+5%' }] })`
-to display a compact status beside the legend, and `plot(series, { legend: false })`
-to hide helper-series numbers. All values are sanitized and bounded at the script-result
-boundary. These are optional, generic APIs; no user-specific indicator is bundled.
+`dashboard({ status, tone, metrics })` displays a compact indicator status and
+`plot(series, { legend: false })` hides helper plots from the legend. Script results
+are sanitized and size-limited. These are generic capabilities; no proprietary or
+personal indicator is bundled.
+
+See `docs/FORK_SYNC.md` for the upstream-sync workflow.
 
 ### API
 
@@ -430,6 +446,7 @@ Web app (public/, plain static files), in the window or any browser:
 | File | What it does |
 | --- | --- |
 | `desktop/main.mjs` | The desktop app: starts the server on `127.0.0.1`, opens the window, remembers its size, opens pop-out charts as app windows. |
+| `desktop/proxy.mjs`, `lib/proxy.mjs` | The network proxy setting: saved by the app, applied to the window (Electron's session) and to the server's requests and Yahoo stream (undici), without a restart. `desktop/preload.cjs` lets the settings dialog read and change it. |
 | `build/icon.png`, `.github/workflows/release.yml` | App icon, and the workflow that builds Windows/macOS/Linux installers for each tagged release. |
 | `public/` | **The web app.** Static files only, no build step. |
 | `public/js/env.js` | Detects the server and holds the website version's data settings (Twelve Data key, rate, server URL). |

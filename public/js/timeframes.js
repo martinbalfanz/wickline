@@ -1,15 +1,18 @@
-// Timeframes: any number of minutes (1–1440) or hours (1–24), plus D, W and M, like TradingView.
+// Timeframes: any number of minutes (1–1440) or hours (1–24), plus D, W and M.
 // Ids are short and stable because workspaces and links save them: 1m 45m 1h 4h 1D 1W 1M.
 // Plain numbers mean minutes (60 → 1h, 240 → 4h). Lower-case m is minutes, upper-case M months.
 //
 // Each data source has its own fixed list of intervals. A timeframe a source doesn't have is
 // built from the largest of its intervals that divides it (10m from 5m, 3h from 1h) and the
-// bars are grouped here. Pure functions with no browser APIs: the server and tests use them too.
+// bars are grouped here. Pure functions with no browser APIs: the server and tests use them too
+// (i18n.js is English there).
+
+import { t } from './i18n.js';
 
 const DAY = 86400;
 const MONTH_SEC = 2629800; // an average month, for spacing and countdowns
 
-const NAMES = { m: 'minute', h: 'hour', D: 'day', W: 'week', M: 'month' };
+const NAMES = { m: 'tf.minutes', h: 'tf.hours', D: 'tf.days', W: 'tf.weeks', M: 'tf.months' }; // "45 minutes", "1 hour"
 const SECONDS = { m: 60, h: 3600, D: DAY, W: 7 * DAY, M: MONTH_SEC };
 
 /** The timeframe of n units (m, h, D, W or M) in its canonical form, or null if it isn't one. */
@@ -32,7 +35,7 @@ export function makeTf(n, unit) {
     sec: n * SECONDS[unit],
     daily,
     label: daily ? unit : `${n}${unit === 'h' ? 'H' : 'm'}`, // header button: 45m, 4H, D, W, M
-    long: `${n} ${NAMES[unit]}${n === 1 ? '' : 's'}`, // 45 minutes, 1 hour
+    long: t(NAMES[unit], { n }), // 45 minutes, 1 hour
   };
 }
 
@@ -79,9 +82,9 @@ export const tfIdOf = (text) => parseTf(text)?.id || null;
 
 /** The common timeframes, grouped as in the header's ▾ menu. */
 export const TF_GROUPS = [
-  { title: 'Minutes', ids: ['1m', '2m', '3m', '5m', '10m', '15m', '30m', '45m'] },
-  { title: 'Hours', ids: ['1h', '2h', '3h', '4h', '6h', '8h', '12h'] },
-  { title: 'Days', ids: ['1D', '1W', '1M'] },
+  { title: t('tf.group.minutes'), ids: ['1m', '2m', '3m', '5m', '10m', '15m', '30m', '45m'] },
+  { title: t('tf.group.hours'), ids: ['1h', '2h', '3h', '4h', '6h', '8h', '12h'] },
+  { title: t('tf.group.days'), ids: ['1D', '1W', '1M'] },
 ];
 
 // ---------------------------------------------------------------------------
@@ -165,7 +168,7 @@ export function groupBars(bars, bucket) {
 
 /**
  * Start (UTC seconds) of the bar holding time t on exchanges that keep bars in UTC (crypto):
- * intraday bars restart at 00:00 UTC every day (as on TradingView; the same as one long grid
+ * intraday bars restart at 00:00 UTC every day (the same as one long grid
  * for sizes that divide a day), weeks start on Monday, months on the 1st.
  */
 export function utcBucket(t, tf) {

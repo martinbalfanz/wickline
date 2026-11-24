@@ -10,6 +10,7 @@
 import { apiUrl, dataMode, isServerMode } from './env.js';
 import { scriptStore } from './scripts.js';
 import { $, esc, store } from './util.js';
+import { t, lang, locale } from './i18n.js';
 
 export const REPO_URL = 'https://github.com/keptaduona/wickline';
 const RAW_BASE = 'https://raw.githubusercontent.com/keptaduona/wickline/main/community/';
@@ -121,7 +122,7 @@ let dateFormat = null;
 function shortDate(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  dateFormat ||= new Intl.DateTimeFormat([], { year: 'numeric', month: 'short', day: 'numeric' });
+  dateFormat ||= new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'short', day: 'numeric' });
   return dateFormat.format(d);
 }
 
@@ -132,21 +133,20 @@ const codeUrl = (entry) => `${REPO_URL}/blob/main/community/${entry.file}`;
 export function communityHtml(filter = '') {
   const seg = (attr, value, label, on) => `<button type="button" data-${attr}="${value}" class="${on ? 'on' : ''}">${label}</button>`;
   const bar = `<div class="cm-bar">
-      <span class="cm-seg">${seg('cm-sort', 'popular', 'Most liked', state.sort === 'popular')}${seg('cm-sort', 'new', 'Newest', state.sort === 'new')}</span>
-      <span class="cm-seg">${seg('cm-kind', 'all', 'All', state.kind === 'all')}${seg('cm-kind', 'indicator', 'Indicators', state.kind === 'indicator')}${seg('cm-kind', 'strategy', 'Strategies', state.kind === 'strategy')}</span>
+      <span class="cm-seg">${seg('cm-sort', 'popular', t('comm.mostLiked'), state.sort === 'popular')}${seg('cm-sort', 'new', t('comm.newest'), state.sort === 'new')}</span>
+      <span class="cm-seg">${seg('cm-kind', 'all', t('common.all'), state.kind === 'all')}${seg('cm-kind', 'indicator', t('comm.indicators'), state.kind === 'indicator')}${seg('cm-kind', 'strategy', t('comm.strategies'), state.kind === 'strategy')}</span>
       <span class="spacer"></span>
-      <button type="button" class="cm-link" data-cm-publish="1">+ Publish yours</button>
+      <button type="button" class="cm-link" data-cm-publish="1">${t('comm.publishYours')}</button>
     </div>`;
 
-  if (state.status === 'loading' || state.status === 'idle') return `${bar}<div class="cm-state">Loading community scripts…</div>`;
+  if (state.status === 'loading' || state.status === 'idle') return `${bar}<div class="cm-state">${t('comm.loading')}</div>`;
   if (state.status === 'error') {
-    return `${bar}<div class="cm-state">Couldn't load the community library (${esc(state.error)}). Are you online?
-      <button type="button" data-cm-retry="1">Try again</button></div>`;
+    return `${bar}<div class="cm-state">${t('comm.loadError', { error: esc(state.error) })}
+      <button type="button" data-cm-retry="1">${t('comm.tryAgain')}</button></div>`;
   }
 
   const runs = canRunCommunity();
-  const note = runs ? '' : `<div class="cm-note"><b>Community scripts run in the desktop app,</b> where they're cut off from the internet.
-    A website can't do that, so here you can browse them and read their code on GitHub.</div>`;
+  const note = runs ? '' : `<div class="cm-note">${t('comm.webNote')}</div>`;
   const f = filter.trim().toLowerCase();
   const list = state.list
     .filter((s) => state.kind === 'all' || s.kind === state.kind)
@@ -154,7 +154,7 @@ export function communityHtml(filter = '') {
     .sort((a, b) => (state.sort === 'new'
       ? String(b.created).localeCompare(String(a.created))
       : b.likes - a.likes || String(b.created).localeCompare(String(a.created))));
-  if (!list.length) return `${bar}${note}<div class="cm-state">${state.list.length ? 'No community scripts match.' : 'No community scripts yet. Be the first to publish one!'}</div>`;
+  if (!list.length) return `${bar}${note}<div class="cm-state">${state.list.length ? t('comm.noMatch') : t('comm.empty')}</div>`;
 
   const copies = installedCopies();
   return bar + note + list.map((s) => {
@@ -162,20 +162,20 @@ export function communityHtml(filter = '') {
     const update = runs && hasUpdate(s, copy);
     const date = s.created ? shortDate(s.created) : '';
     const who = isOfficial(s)
-      ? '<span class="cm-official" title="Comes with Wickline">✓ Official example</span>'
-      : `<span class="cm-badge" title="Published by a Wickline user on GitHub">Community</span><span>by <b>${esc(authorLabel(s))}</b></span>`;
-    const row = runs ? `class="ind-item cm-item" data-comm="${esc(s.id)}" role="button" tabindex="0" title="Add to the chart"` : 'class="ind-item cm-item cm-browse"';
+      ? `<span class="cm-official" title="${esc(t('comm.officialTitle'))}">${t('comm.official')}</span>`
+      : `<span class="cm-badge" title="${esc(t('comm.badgeTitle'))}">${t('comm.badge')}</span><span>${t('comm.by', { author: esc(authorLabel(s)) })}</span>`;
+    const row = runs ? `class="ind-item cm-item" data-comm="${esc(s.id)}" role="button" tabindex="0" title="${esc(t('comm.addTitle'))}"` : 'class="ind-item cm-item cm-browse"';
     const code = runs
-      ? `<button type="button" data-cm-code="${esc(s.id)}" title="Open the code in the script editor">Code</button>`
-      : `<a href="${esc(codeUrl(s))}" target="_blank" rel="noopener" title="Read the code on GitHub">Code</a>`;
+      ? `<button type="button" data-cm-code="${esc(s.id)}" title="${esc(t('comm.codeTitle'))}">${t('comm.code')}</button>`
+      : `<a href="${esc(codeUrl(s))}" target="_blank" rel="noopener" title="${esc(t('comm.codeGithubTitle'))}">${t('comm.code')}</a>`;
     return `<div ${row}>
-      <span class="ind-name">${esc(s.name)} <span class="cm-kind ${s.kind}">${s.kind}</span>${copy ? '<span class="cm-installed">✓ in My scripts</span>' : ''}</span>
+      <span class="ind-name">${esc(s.name)} <span class="cm-kind ${s.kind}">${s.kind === 'strategy' ? t('comm.kindStrategy') : t('comm.kindIndicator')}</span>${copy ? `<span class="cm-installed">${t('comm.installed')}</span>` : ''}</span>
       <span class="ind-desc">${esc(s.description)}</span>
-      <span class="cm-meta">${who}<span>♥ ${s.likes}</span>${date ? `<span>${esc(date)}</span>` : ''}${s.tags.map((t) => `<span class="cm-tag">${esc(t)}</span>`).join('')}</span>
+      <span class="cm-meta">${who}<span>♥ ${s.likes}</span>${date ? `<span>${esc(date)}</span>` : ''}${s.tags.map((tag) => `<span class="cm-tag">${esc(tag)}</span>`).join('')}</span>
       <span class="cm-actions">
-        ${update ? `<button type="button" class="cm-update" data-cm-update="${esc(s.id)}" title="A newer version was published">Update</button>` : ''}
+        ${update ? `<button type="button" class="cm-update" data-cm-update="${esc(s.id)}" title="${esc(t('comm.updateTitle'))}">${t('comm.update')}</button>` : ''}
         ${code}
-        ${s.issue ? `<button type="button" data-cm-like="${esc(s.id)}" title="Like or discuss it on GitHub">♥ Like</button>` : ''}
+        ${s.issue ? `<button type="button" data-cm-like="${esc(s.id)}" title="${esc(t('comm.likeTitle'))}">${t('comm.like')}</button>` : ''}
       </span>
     </div>`;
   }).join('');
@@ -194,12 +194,12 @@ async function sha256Hex(text) {
 export async function fetchCommunityCode(entry) {
   const v = entry.sha256 || entry.updated;
   const r = await fetch(`${await base()}${entry.file}${v ? `?v=${encodeURIComponent(v)}` : ''}`, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
-  if (!r.ok) throw new Error(`Couldn't download “${entry.name}” (HTTP ${r.status})`);
+  if (!r.ok) throw new Error(t('comm.downloadFailed', { name: entry.name, status: r.status }));
   const code = await r.text();
-  if (code.length > MAX_CODE) throw new Error(`“${entry.name}” is too large`);
+  if (code.length > MAX_CODE) throw new Error(t('comm.tooLarge', { name: entry.name }));
   if (entry.sha256) {
     const hash = await sha256Hex(code);
-    if (hash && hash !== entry.sha256) throw new Error(`The newest version of “${entry.name}” isn't available yet. Try again in a few minutes.`);
+    if (hash && hash !== entry.sha256) throw new Error(t('comm.notYet', { name: entry.name }));
   }
   return code;
 }
@@ -212,7 +212,7 @@ const installing = new Map(); // copyKey → the install in progress (a double c
  */
 export function installCommunity(entry, { update = false } = {}) {
   if (!canRunCommunity()) {
-    return Promise.reject(new Error('Community scripts run in the desktop app, where they’re cut off from the internet.'));
+    return Promise.reject(new Error(t('comm.desktopOnly')));
   }
   const key = copyKey(entry);
   if (!installing.has(key)) {
@@ -268,21 +268,19 @@ export function openPublish(info, { toast } = {}) {
       const description = $('#pub-desc').value.trim();
       const tags = $('#pub-tags').value.trim();
       const problems = [];
-      if (!name) problems.push('Give the script a name.');
-      if (description.length < 10) problems.push('Add a sentence describing what it does.');
-      if (!$('#pub-license').checked) problems.push('Tick the license box.');
-      if (pub.info.code.length > 60000) problems.push('The script is too long to publish (60,000 characters at most).');
+      if (!name) problems.push(t('comm.pub.needName'));
+      if (description.length < 10) problems.push(t('comm.pub.needDesc'));
+      if (!$('#pub-license').checked) problems.push(t('comm.pub.needLicense'));
+      if (pub.info.code.length > 60000) problems.push(t('comm.pub.tooLong', { max: (60000).toLocaleString(locale) }));
       err.hidden = !problems.length;
-      err.textContent = problems.join(' ');
+      err.textContent = problems.join(lang === 'en' ? ' ' : ''); // Chinese and Japanese sentences need no space between them
       if (problems.length) return;
       const { url, includesCode } = publishUrl({ name, description, tags, code: pub.info.code });
       let copied = false;
       try { await navigator.clipboard.writeText(pub.info.code); copied = true; } catch { /* not allowed here */ }
       window.open(url, '_blank', 'noopener');
       close();
-      pub.toast?.(includesCode
-        ? 'GitHub opened in your browser: press “Submit new issue” to publish.'
-        : `GitHub opened in your browser. The script is long, so paste it into the Code box${copied ? ' (it’s on your clipboard)' : ''}, then press “Submit new issue”.`);
+      pub.toast?.(t(includesCode ? 'comm.pub.opened' : copied ? 'comm.pub.openedPasteCopied' : 'comm.pub.openedPaste'));
     });
   }
   pub.info = info;

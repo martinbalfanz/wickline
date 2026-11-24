@@ -5,7 +5,7 @@
 import { parseSymbol, displayTicker, SOURCES, loadUniverse, extendedHours } from './datafeed.js';
 import { tfById, tfIdOf } from './timeframes.js';
 import { TimeframeBar, IntervalBox } from './timeframe-ui.js';
-import { INDICATORS, CATEGORIES } from './indicators.js';
+import { INDICATORS, CATEGORIES, categoryLabel } from './indicators.js';
 import {
   ChartView, normalizeChartState, cloneChartState, closeSettings, settingsOpen, CHART_TYPES,
 } from './chart-view.js';
@@ -18,7 +18,7 @@ import { SymbolSearch } from './search.js';
 import { QuoteList } from './quote-list.js';
 import { MarketBrowser } from './market-browser.js';
 import { MARKET_GROUPS } from './markets.js';
-import { AlertManager, CONDITIONS, chime } from './alerts.js';
+import { AlertManager, CONDITIONS, alertText, chime } from './alerts.js';
 import { ScriptEditor } from './script-editor.js';
 import { StrategyTester } from './strategy-tester.js';
 import { scriptStore, TEMPLATES } from './scripts.js';
@@ -32,12 +32,16 @@ import { checkForUpdate } from './update.js';
 import { Screener } from './screener.js';
 import { NewsPanel } from './news.js';
 import { TradingPanel } from './trading.js';
-import { HeatmapPanel } from './heatmap.js';
+import { HeatmapPanel, groupName as sectorName } from './heatmap.js';
 import { OptionsPanel } from './options.js';
-import { $, esc, store, formatNumber, smartDecimals } from './util.js';
+import { $, esc, store, formatNumber, smartDecimals, fixed } from './util.js';
+import { t, lang, locale, applyI18n, LANGUAGES, savedLang, setLang } from './i18n.js';
 import {
   LAYOUTS, layoutOf, equalSizes, validSizes, sizesEntry, paneRects, dividers, moveDivider, resetSplit,
 } from './layouts.js';
+
+// index.html's text in the UI language, before any code below reads or rewrites it.
+applyI18n();
 
 const POPOUT = new URLSearchParams(location.search).get('popout') === '1';
 if (POPOUT) document.body.classList.add('popout', 'wl-closed');
@@ -90,12 +94,12 @@ const DEFAULT_WATCHLIST = [
 ];
 
 const STATUS_TEXT = {
-  live: 'Live',
-  polling: 'No live trades right now (market closed?)',
-  connecting: 'Connecting…',
-  reconnecting: 'Reconnecting…',
-  error: 'Connection problem',
-  replay: 'Replay: history, not live prices',
+  live: t('common.live'),
+  polling: t('app.status.polling'),
+  connecting: t('app.status.connecting'),
+  reconnecting: t('app.status.reconnecting'),
+  error: t('app.status.error'),
+  replay: t('app.status.replay'),
 };
 
 const b64encode = (s) => btoa(String.fromCharCode(...new TextEncoder().encode(s)));
@@ -110,7 +114,7 @@ function applyHash(state, hash) {
   if (tfIdOf(hash.get('tf'))) state.tf = tfIdOf(hash.get('tf')); // any timeframe: 45m, 4h, 1D…
 }
 
-// What the charts in a layout share: symbol and timeframe off by default (like TradingView),
+// What the charts in a layout share: symbol and timeframe off by default,
 // the crosshair on.
 const DEFAULT_SYNC = { symbol: false, interval: false, crosshair: true };
 
@@ -255,7 +259,7 @@ function renderPanes() {
       el.className = 'split';
       el.dataset.split = d.id;
       el.dataset.axis = d.axis;
-      el.title = 'Drag to resize. Double-click for equal sizes.';
+      el.title = t('app.split');
       chartsEl.append(el);
       return el;
     });
@@ -359,7 +363,7 @@ function syncCrosshair(src, param) {
 function popout(v) {
   const url = `${location.pathname}?popout=1#c=${encodeURIComponent(b64encode(JSON.stringify(v.state)))}`;
   const w = window.open(url, '_blank', 'popup=yes,width=1100,height=720');
-  if (!w) toast('Pop-up blocked. Allow pop-ups for this site to open charts in new windows.');
+  if (!w) toast(t('app.popupBlocked'));
 }
 
 // --- Sync across charts (Layout menu) ------------------------------------------------
@@ -433,8 +437,7 @@ $('#ext-btn').addEventListener('click', () => {
     if (v.source === 'YAHOO' && !tfById(v.state.tf).daily) v.load();
   }
   syncHeader();
-  toast(extendedHours.on ? 'Extended hours on: pre-market and after-hours trades move the candles'
-    : 'Extended hours off: candles show the regular session only');
+  toast(extendedHours.on ? t('app.ext.on') : t('app.ext.off'));
 });
 
 /**
@@ -478,7 +481,7 @@ function fitHeader() {
   else if (!moreMenu.hidden) renderMoreMenu();
 }
 
-const moreLabel = (b) => b.querySelector('span')?.textContent.trim() || b.title.split(/[:(]/)[0].trim() || b.textContent.trim();
+const moreLabel = (b) => b.querySelector('span')?.textContent.trim() || b.title.split(/[:(：（]/)[0].trim() || b.textContent.trim();
 function renderMoreMenu() {
   moreMenu.replaceChildren(...OVERFLOW.toReversed().map((id) => document.getElementById(id))
     .filter((b) => b.classList.contains('ovf'))
@@ -524,13 +527,13 @@ function syncHeader() {
   queueMicrotask(fitHeader);
   $('#log-btn').classList.toggle('on', v.state.logScale);
   $('#rp-btn').classList.toggle('on', !!(v.replay || v.replayPick));
-  $('#rp-btn').title = v.replay || v.replayPick ? 'Exit the replay (back to live data)' : 'Bar replay: replay history candle by candle and practice trading it';
+  $('#rp-btn').title = v.replay || v.replayPick ? t('app.hdr.rpExit') : t('app.hdr.rpTip');
   const src = SOURCES[v.source];
   $('#source').textContent = src?.crypto
-    ? `${src.name} · every trade, real time`
+    ? t('app.src.crypto', { name: src.name })
     : modeNow === 'static'
-      ? 'Twelve Data history · live trades from Yahoo'
-      : 'Yahoo Finance · live trades, some exchanges delayed';
+      ? t('app.src.static')
+      : t('app.src.yahoo');
 }
 
 // ---------------------------------------------------------------------------
@@ -544,12 +547,17 @@ const settingsModal = $('#settings-modal');
 function syncDataMode() {
   const btn = $('#data-mode');
   btn.hidden = !modeNow;
-  if (modeNow === 'server') btn.textContent = IS_DESKTOP ? 'Data: built into the desktop app (no keys needed)' : 'Data: Wickline server (no keys needed)';
-  else btn.textContent = settings.tdKey ? 'Data: crypto + stocks (your Twelve Data key)' : 'Data: crypto only · add a free key for stocks';
+  if (modeNow === 'server') btn.textContent = IS_DESKTOP ? t('app.mode.desktop') : t('app.mode.server');
+  else btn.textContent = settings.tdKey ? t('app.mode.tdKey') : t('app.mode.cryptoOnly');
   btn.classList.toggle('warn', modeNow === 'static' && !settings.tdKey);
 }
 
+// Language: "System default", then each language under its own name (so anyone can find theirs).
+$('#set-lang').innerHTML = `<option value="">${esc(t('app.set.langSystem'))}</option>`
+  + LANGUAGES.map((l) => `<option value="${l.id}">${esc(l.name)}</option>`).join('');
+
 function openSettings() {
+  $('#set-lang').value = savedLang() ?? '';
   $('#set-td-key').value = settings.tdKey;
   $('#set-td-rate').value = settings.tdRate;
   $('#set-api').value = settings.apiBase;
@@ -563,13 +571,75 @@ function openSettings() {
   $('#set-adv').hidden = !isStatic;
   $('#set-test').hidden = !isStatic;
   $('#set-mode').innerHTML = !isStatic
-    ? `<b>${IS_DESKTOP ? 'Desktop app: everything works with no API key.' : 'Connected to a Wickline server: no API key needed.'}</b> Stocks, ETFs, forex, futures and indices come from Yahoo `
-      + `${IS_DESKTOP ? 'over your own connection' : 'through it'}. Crypto comes straight from the exchanges.`
-    : '<b>Running as a static website</b> (no server). Crypto comes straight from Binance, Binance Futures and Coinbase. '
-      + 'For stocks, ETFs, forex and indices, add your own free Twelve Data key below, or use the '
-      + '<a href="https://github.com/keptaduona/wickline/releases/latest" target="_blank" rel="noopener">desktop app</a>, which needs no key.';
+    ? (IS_DESKTOP ? t('app.set.modeDesktop') : t('app.set.modeServer'))
+    : t('app.set.modeStatic');
+  openProxySettings(isStatic);
   settingsModal.hidden = false;
   if (isStatic) $('#set-td-key').focus();
+}
+
+// Network proxy: a setting of the desktop app itself (desktop/preload.cjs). A website goes through
+// whatever proxy the browser uses, and `npm start` through the one in its WICKLINE_PROXY variable.
+const desktopApi = window.wicklineDesktop || null;
+let proxyLoaded = null;
+
+async function openProxySettings(isStatic) {
+  $('#set-proxy').hidden = !desktopApi;
+  $('#set-proxy-web').hidden = !!desktopApi;
+  $('#set-proxy-web').textContent = isStatic ? t('app.proxy.webStatic') : t('app.proxy.webServer');
+  proxyLoaded = null;
+  if (!desktopApi) return;
+  const p = await desktopApi.getProxy().catch(() => null);
+  if (!p) { $('#set-proxy').hidden = true; return; }
+  proxyLoaded = p;
+  $('#set-proxy-mode').value = p.mode;
+  $('#set-proxy-server').value = p.server;
+  syncProxyRow();
+  showProxyNow(p);
+}
+
+function showProxyNow(p) {
+  $('#set-proxy-now').textContent = p.active && p.active !== 'direct'
+    ? t('app.proxy.now', { proxy: p.active }) : p.mode === 'off' ? '' : t('app.proxy.direct');
+}
+
+function syncProxyRow() {
+  $('#set-proxy-row').hidden = $('#set-proxy-mode').value !== 'manual';
+}
+
+$('#set-proxy-mode').addEventListener('change', () => {
+  syncProxyRow();
+  if ($('#set-proxy-mode').value === 'manual') $('#set-proxy-server').focus();
+});
+
+// Why the desktop app can't use a proxy comes in English (lib/proxy.mjs): shown in the UI language.
+const PROXY_ERRORS = {
+  'Enter the proxy as host:port, e.g. 127.0.0.1:7890.': 'app.proxy.err.empty',
+  'That isn\'t a proxy address. Use host:port, e.g. 127.0.0.1:7890.': 'app.proxy.err.invalid',
+  'The proxy address needs a host.': 'app.proxy.err.host',
+  'Enter only the proxy\'s host and port, no path.': 'app.proxy.err.path',
+  'Add the proxy\'s port, e.g. 127.0.0.1:7890.': 'app.proxy.err.port',
+  'Proxies that need a password aren\'t supported. Use a local proxy app, or "Use system proxy".': 'app.proxy.err.auth',
+};
+function proxyError(msg) {
+  if (!msg) return t('app.proxy.failed');
+  if (PROXY_ERRORS[msg]) return t(PROXY_ERRORS[msg]);
+  const type = /^Unsupported proxy type "(.*)"\. Use http:\/\/, https:\/\/ or socks5:\/\/\.$/.exec(msg);
+  return type ? t('app.proxy.err.scheme', { type: type[1] }) : msg;
+}
+
+/** Saves a changed proxy setting; false (with the reason shown) if it can't be used. */
+async function saveProxySettings() {
+  if (!desktopApi || !proxyLoaded) return true;
+  const next = { mode: $('#set-proxy-mode').value, server: $('#set-proxy-server').value.trim() };
+  if (next.mode === proxyLoaded.mode && next.server === proxyLoaded.server) return true;
+  const r = await desktopApi.setProxy(next).catch((e) => ({ ok: false, error: e.message }));
+  if (r?.ok) return true;
+  const status = $('#set-status');
+  status.textContent = proxyError(r?.error);
+  status.className = 'form-note set-status bad';
+  if (next.mode === 'manual') $('#set-proxy-server').focus();
+  return false;
 }
 
 $('#settings-btn').addEventListener('click', openSettings);
@@ -580,23 +650,25 @@ settingsModal.addEventListener('keydown', (e) => e.stopPropagation());
 $('#set-test').addEventListener('click', async () => {
   const status = $('#set-status');
   const key = $('#set-td-key').value.trim();
-  if (!key) { status.textContent = 'Paste a key first.'; status.className = 'form-note set-status bad'; return; }
-  status.textContent = 'Checking…';
+  if (!key) { status.textContent = t('app.set.pasteKey'); status.className = 'form-note set-status bad'; return; }
+  status.textContent = t('app.set.checking');
   status.className = 'form-note set-status';
   try {
     const u = await tdCheckKey(key);
-    status.textContent = `Key works · ${u.plan_category || 'plan'} · ${u.current_usage ?? 0} of ${u.plan_limit ?? '?'} requests used this minute.`;
+    status.textContent = t('app.set.keyWorks', { plan: u.plan_category || t('app.set.plan'), used: u.current_usage ?? 0, limit: u.plan_limit ?? '?' });
     status.className = 'form-note set-status ok';
   } catch (e) {
-    status.textContent = `That key didn't work: ${e.message}`;
+    status.textContent = t('app.set.keyFailed', { error: e.message });
     status.className = 'form-note set-status bad';
   }
 });
-$('#settings-form').addEventListener('submit', (e) => {
+$('#settings-form').addEventListener('submit', async (e) => {
   e.preventDefault();
+  if (!(await saveProxySettings())) return;
   settings.set('tdKey', $('#set-td-key').value.trim());
   settings.set('tdRate', Math.max(1, Math.round(Number($('#set-td-rate').value) || 8)));
   settings.set('apiBase', $('#set-api').value.trim());
+  setLang($('#set-lang').value || null); // '' = follow the system
   settingsModal.hidden = true;
   location.reload(); // simplest way to reconnect every chart with the new sources
 });
@@ -613,9 +685,9 @@ function syncTitle() {
   const last = v.lastBar;
   const prev = v.bars[v.bars.length - 2];
   if (!last || !v.feed) { document.title = `${v.ticker} · Wickline`; return; } // loading or failed
-  if (v.replay) { document.title = `Replay · ${v.ticker} ${v.formatPrice(last.close)} · Wickline`; return; }
+  if (v.replay) { document.title = t('app.titleReplay', { ticker: v.ticker, price: v.formatPrice(last.close) }); return; }
   const pct = prev ? ((last.close - prev.close) / prev.close) * 100 : 0;
-  document.title = `${v.ticker} ${v.formatPrice(last.close)} ${pct >= 0 ? '▲' : '▼'}${Math.abs(pct).toFixed(2)}% · Wickline`;
+  document.title = `${v.ticker} ${v.formatPrice(last.close)} ${pct >= 0 ? '▲' : '▼'}${fixed(Math.abs(pct), 2)}% · Wickline`;
 }
 
 let toastTimer;
@@ -656,8 +728,9 @@ function renderAppearance() {
       </span>${esc(p.name)}</button>`;
   }).join('');
   const custom = isCustomized(mode);
-  $('#appear-mode-label').textContent = `Editing the ${mode} theme of ${PRESETS[presetId()].name}${custom ? ' (customized)' : ''}`;
-  $('#appear-mode-switch').textContent = mode === 'dark' ? 'Edit light theme' : 'Edit dark theme';
+  const editing = { mode: mode === 'dark' ? t('theme.mode.dark') : t('theme.mode.light'), preset: PRESETS[presetId()].name };
+  $('#appear-mode-label').textContent = custom ? t('theme.editingCustom', editing) : t('theme.editing', editing);
+  $('#appear-mode-switch').textContent = mode === 'dark' ? t('theme.editLight') : t('theme.editDark');
   $('#appear-reset').hidden = !custom;
   const p = palette(mode);
   let group = '';
@@ -693,20 +766,20 @@ const layoutMenu = $('#layout-menu');
 function renderLayoutMenu() {
   const sync = ws.sync || DEFAULT_SYNC;
   const linked = sync.symbol || sync.interval;
-  $('#layout-btn').innerHTML = `${layoutIcon(ws.layout)}<span>Layout</span>${linked ? '<i class="sync-dot" title="Charts are synced"></i>' : ''}`;
-  $('#layout-btn').title = linked ? 'Chart layout (charts are synced)' : 'Chart layout';
-  const check = (kind, label, hint) => `<label class="menu-check" title="${hint}">
-      <input type="checkbox" data-sync="${kind}"${sync[kind] ? ' checked' : ''}><span>${label}</span></label>`;
+  $('#layout-btn').innerHTML = `${layoutIcon(ws.layout)}<span>${esc(t('app.hdr.layout'))}</span>${linked ? `<i class="sync-dot" title="${esc(t('app.layout.synced'))}"></i>` : ''}`;
+  $('#layout-btn').title = linked ? t('app.hdr.layoutTipSynced') : t('app.hdr.layoutTip');
+  const check = (kind, label, hint) => `<label class="menu-check" title="${esc(hint)}">
+      <input type="checkbox" data-sync="${kind}"${sync[kind] ? ' checked' : ''}><span>${esc(label)}</span></label>`;
   // One row per chart count, a button for each shape.
   const counts = [...new Set(LAYOUTS.map((l) => l.n))];
-  layoutMenu.innerHTML = `<div class="menu-title">Charts</div>`
+  layoutMenu.innerHTML = `<div class="menu-title">${esc(t('app.charts'))}</div>`
     + counts.map((n) => `<div class="layout-row"><span class="layout-n">${n}</span>${LAYOUTS.filter((l) => l.n === n).map((l) => `
-      <button class="layout-pick${l.id === ws.layout ? ' on' : ''}" data-layout="${l.id}" title="${l.title}" aria-label="${l.title}">${layoutIcon(l.id)}</button>`).join('')}
+      <button class="layout-pick${l.id === ws.layout ? ' on' : ''}" data-layout="${l.id}" title="${esc(l.title)}" aria-label="${esc(l.title)}">${layoutIcon(l.id)}</button>`).join('')}
     </div>`).join('')
-    + `<div class="menu-sep"></div><div class="menu-title">Sync across charts</div>
-    ${check('symbol', 'Symbol', 'Changing the symbol on one chart changes it on all charts and pop-out windows')}
-    ${check('interval', 'Timeframe', 'Changing the timeframe on one chart changes it on all charts and pop-out windows')}
-    ${check('crosshair', 'Crosshair', 'Show the crosshair at the same time on all charts')}`;
+    + `<div class="menu-sep"></div><div class="menu-title">${esc(t('app.layout.sync'))}</div>
+    ${check('symbol', t('common.symbol'), t('app.layout.syncSymbolTip'))}
+    ${check('interval', t('app.hdr.timeframe'), t('app.layout.syncIntervalTip'))}
+    ${check('crosshair', t('app.layout.crosshair'), t('app.layout.syncCrosshairTip'))}`;
 }
 
 function openMenu(menu, anchor, { above = false, side = false } = {}) {
@@ -750,17 +823,17 @@ document.addEventListener('mousedown', (e) => {
 const toolMenu = $('#tool-menu');
 const groupTool = store.get('toolGroups', {});
 const currentOf = (g) => (g.tools.includes(groupTool[g.id]) ? groupTool[g.id] : g.tools[0]);
-const toolTitle = (t) => `${TOOLS[t].label}${TOOL_KEYS[t] ? ` (${TOOL_KEYS[t]})` : ''}`;
+const toolTitle = (id) => `${TOOLS[id].label}${TOOL_KEYS[id] ? ` (${TOOL_KEYS[id]})` : ''}`;
 
 function renderToolbar() {
   $('#toolbar').innerHTML = TOOL_GROUPS.map((g) => {
-    const t = currentOf(g);
+    const tool = currentOf(g);
     return `<div class="tool-group" data-group="${g.id}">
-      <button data-tool="${t}" title="${toolTitle(t)}" aria-label="${TOOLS[t].label}">${TOOL_ICONS[t]}</button>
-      ${g.tools.length > 1 ? `<button class="tool-more" data-more="${g.id}" title="More tools" aria-label="More ${g.id} tools"></button>` : ''}
+      <button data-tool="${tool}" title="${toolTitle(tool)}" aria-label="${TOOLS[tool].label}">${TOOL_ICONS[tool]}</button>
+      ${g.tools.length > 1 ? `<button class="tool-more" data-more="${g.id}" title="${esc(t('app.tool.more'))}" aria-label="${esc(t(`app.tool.moreGroup.${g.id}`))}"></button>` : ''}
     </div>`;
   }).join('') + `<div class="tool-sep"></div>
-    <button id="clear-drawings" title="Remove all drawings" aria-label="Remove all drawings">${svg(`<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12" ${S}/>`)}</button>`;
+    <button id="clear-drawings" title="${esc(t('app.tool.clearAll'))}" aria-label="${esc(t('app.tool.clearAll'))}">${svg(`<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12" ${S}/>`)}</button>`;
   setToolUI(activeView?.drawings.tool || 'cursor');
 }
 
@@ -785,14 +858,14 @@ $('#toolbar').addEventListener('click', (e) => {
   if (!b || !activeView) return;
   if (b.dataset.more) {
     const g = TOOL_GROUPS.find((x) => x.id === b.dataset.more);
-    toolMenu.innerHTML = g.tools.map((t) => `<button class="layout-opt" data-pick="${t}">${TOOL_ICONS[t]}<span>${TOOLS[t].label}</span><kbd>${TOOL_KEYS[t] || ''}</kbd></button>`).join('');
+    toolMenu.innerHTML = g.tools.map((id) => `<button class="layout-opt" data-pick="${id}">${TOOL_ICONS[id]}<span>${TOOLS[id].label}</span><kbd>${TOOL_KEYS[id] || ''}</kbd></button>`).join('');
     openMenu(toolMenu, b.closest('.tool-group'), { side: true });
     return;
   }
   if (b.dataset.tool) selectTool(b.dataset.tool);
   if (b.id === 'clear-drawings') {
-    if (!activeView.drawings.items.length) { toast('No drawings on this chart'); return; }
-    if (confirm(`Remove all drawings on ${activeView.ticker}?`)) activeView.clearDrawings();
+    if (!activeView.drawings.items.length) { toast(t('app.tool.none')); return; }
+    if (confirm(t('app.tool.confirmClear', { ticker: activeView.ticker }))) activeView.clearDrawings();
   }
 });
 toolMenu.addEventListener('click', (e) => {
@@ -807,7 +880,9 @@ toolMenu.addEventListener('click', (e) => {
 // ---------------------------------------------------------------------------
 
 const indModal = $('#ind-modal');
-let indCat = 'All';
+let indCat = 'All'; // a category id (English), also 'All', 'My scripts' and 'Community'
+const catLabel = (c) => (c === 'All' ? t('common.all') : c === 'My scripts' ? t('app.ind.mine')
+  : c === 'Community' ? t('app.ind.community') : categoryLabel(c));
 
 function renderIndicatorList() {
   const f = $('#ind-search').value.trim().toLowerCase();
@@ -816,7 +891,7 @@ function renderIndicatorList() {
     const count = c === 'All' ? Object.keys(INDICATORS).length : c === 'My scripts' ? scriptStore.list().length
       : c === 'Community' ? (communityCount() ?? '')
         : Object.values(INDICATORS).filter((d) => d.category === c).length;
-    return `<button data-cat="${esc(c)}" class="${c === indCat ? 'on' : ''}">${esc(c)}<small>${count}</small></button>`;
+    return `<button data-cat="${esc(c)}" class="${c === indCat ? 'on' : ''}">${esc(catLabel(c))}<small>${count}</small></button>`;
   }).join('');
 
   if (indCat === 'Community') {
@@ -828,23 +903,24 @@ function renderIndicatorList() {
   if (indCat === 'My scripts' || (indCat === 'All' && f)) {
     const scripts = scriptStore.list().filter((s) => match(s.name)).sort((a, b) => a.name.localeCompare(b.name));
     if (indCat === 'My scripts') {
-      html += `<button class="ind-item ind-new" data-new="1"><span class="ind-name">+ New script</span>
-        <span class="ind-desc">Write your own indicator in JavaScript (opens the script editor)</span></button>`;
+      html += `<button class="ind-item ind-new" data-new="1"><span class="ind-name">${esc(t('app.ind.newScript'))}</span>
+        <span class="ind-desc">${esc(t('app.ind.newScriptDesc'))}</span></button>`;
     }
     html += scripts.map((s) => `<div class="ind-item ind-script" data-script="${esc(s.id)}" role="button" tabindex="0">
-        <span class="ind-name">${esc(s.name)}</span><span class="ind-desc">${!s.community ? 'Your script' : isOfficial(s.community) ? 'Official Wickline example' : `From the community · by ${esc(authorLabel(s.community))}`}</span>
-        <button class="ind-edit" data-edit="${esc(s.id)}">Edit</button></div>`).join('');
-    if (indCat === 'My scripts' && !scripts.length) html += '<div class="sr-empty">No saved scripts yet.</div>';
+        <span class="ind-name">${esc(s.name)}</span><span class="ind-desc">${esc(!s.community ? t('app.ind.yourScript') : isOfficial(s.community) ? t('app.ind.official')
+          : t('app.ind.fromCommunity', { author: authorLabel(s.community) }))}</span>
+        <button class="ind-edit" data-edit="${esc(s.id)}">${esc(t('common.edit'))}</button></div>`).join('');
+    if (indCat === 'My scripts' && !scripts.length) html += `<div class="sr-empty">${esc(t('app.ind.noScripts'))}</div>`;
   }
   if (indCat !== 'My scripts') {
     html += Object.entries(INDICATORS)
       .filter(([, d]) => (indCat === 'All' || d.category === indCat) && match(d.name, `${d.short} ${d.description}`))
       .map(([key, d]) => `<button class="ind-item" data-type="${key}">
           <span class="ind-name">${esc(d.name)}</span>
-          <span class="ind-desc">${esc(d.description)}${d.overlay ? '' : ' · separate pane'}</span>
+          <span class="ind-desc">${esc(d.description)}${d.overlay ? '' : esc(t('app.ind.separatePane'))}</span>
         </button>`).join('');
   }
-  $('#ind-list').innerHTML = html || '<div class="sr-empty">No matches</div>';
+  $('#ind-list').innerHTML = html || `<div class="sr-empty">${esc(t('app.ind.noMatches'))}</div>`;
 }
 
 const rerenderIndicators = () => { if (!indModal.hidden) renderIndicatorList(); };
@@ -872,19 +948,19 @@ indModal.querySelector('.close').addEventListener('click', () => { indModal.hidd
 
 /** Community list clicks: sort/filter, publish, retry, code, like, update, or add to the chart. */
 async function onCommunityClick(e) {
-  const t = e.target;
-  const sort = t.closest('[data-cm-sort]'), kind = t.closest('[data-cm-kind]');
+  const target = e.target;
+  const sort = target.closest('[data-cm-sort]'), kind = target.closest('[data-cm-kind]');
   if (sort || kind) { setCommunityView({ sort: sort?.dataset.cmSort, kind: kind?.dataset.cmKind }); renderIndicatorList(); return true; }
-  if (t.closest('[data-cm-retry]')) { loadCommunity({ refresh: true, onDone: rerenderIndicators }); renderIndicatorList(); return true; }
-  if (t.closest('[data-cm-publish]')) {
+  if (target.closest('[data-cm-retry]')) { loadCommunity({ refresh: true, onDone: rerenderIndicators }); renderIndicatorList(); return true; }
+  if (target.closest('[data-cm-publish]')) {
     indModal.hidden = true;
     editor.open();
-    editor.print('info', 'Open or write the script you want to share, then click Publish (next to Delete).');
+    editor.print('info', t('app.ind.publishHint'));
     return true;
   }
-  const like = t.closest('[data-cm-like]');
+  const like = target.closest('[data-cm-like]');
   if (like) { const s = communityEntry(like.dataset.cmLike); if (s) window.open(likeUrl(s), '_blank', 'noopener'); return true; }
-  const code = t.closest('[data-cm-code]');
+  const code = target.closest('[data-cm-code]');
   if (code) {
     const s = communityEntry(code.dataset.cmCode);
     if (!s) return true;
@@ -893,24 +969,24 @@ async function onCommunityClick(e) {
       if (copy) { indModal.hidden = true; editor.edit(copy.id); return true; }
       const text = await fetchCommunityCode(s);
       indModal.hidden = true;
-      if (editor.confirmDiscard()) editor.loadTemplate({ name: `${s.name} by ${authorLabel(s)}`, code: text });
+      if (editor.confirmDiscard()) editor.loadTemplate({ name: t('app.ind.nameBy', { name: s.name, author: authorLabel(s) }), code: text });
       editor.open();
     } catch (err) { toast(err.message); }
     return true;
   }
-  const upd = t.closest('[data-cm-update]');
-  const row = t.closest('[data-comm]');
+  const upd = target.closest('[data-cm-update]');
+  const row = target.closest('[data-comm]');
   if (!upd && !row) return false;
   const s = communityEntry(upd ? upd.dataset.cmUpdate : row.dataset.comm);
   if (!s) return true;
-  if (upd && !confirm(`Replace your copy of “${s.name}” with the newest published version? Changes you made to your copy will be lost.`)) return true;
+  if (upd && !confirm(t('app.ind.confirmUpdate', { name: s.name }))) return true;
   try {
     const id = await installCommunity(s, { update: !!upd });
-    if (upd) { toast(`Updated “${s.name}”`); renderIndicatorList(); return true; }
+    if (upd) { toast(t('app.ind.updated', { name: s.name })); renderIndicatorList(); return true; }
     if (!activeView) return true;
     if (!activeView.hasScript(id)) activeView.addScript(id);
     indModal.hidden = true;
-    toast(`Added “${s.name}” by ${authorLabel(s)}`);
+    toast(t('app.ind.addedBy', { name: s.name, author: authorLabel(s) }));
   } catch (err) { toast(err.message); }
   return true;
 }
@@ -930,14 +1006,14 @@ $('#ind-list').addEventListener('click', async (e) => {
   if (script) {
     activeView.addScript(script.dataset.script);
     indModal.hidden = true;
-    toast(`Added ${scriptStore.get(script.dataset.script)?.name || 'script'}`);
+    toast(t('app.ind.added', { name: scriptStore.get(script.dataset.script)?.name || t('app.ind.script') }));
     return;
   }
   const item = e.target.closest('[data-type]');
   if (!item) return;
   const added = activeView.addIndicator(item.dataset.type);
   indModal.hidden = true;
-  toast(added ? `Added ${INDICATORS[item.dataset.type].name}` : 'Volume is already on this chart');
+  toast(added ? t('app.ind.added', { name: INDICATORS[item.dataset.type].name }) : t('app.ind.volumeOn'));
 });
 
 // ---------------------------------------------------------------------------
@@ -967,7 +1043,7 @@ $('#rp-btn').addEventListener('click', () => {
   const v = activeView;
   if (!v) return;
   if (v.replay || v.replayPick) v.stopReplay();
-  else if (!v.startReplayPick()) toast('Wait for the chart to load, then pick where the replay starts.');
+  else if (!v.startReplayPick()) toast(t('app.rp.wait'));
   syncHeader();
 });
 
@@ -1005,7 +1081,7 @@ let watchSymbols = store.get('watchlist', DEFAULT_WATCHLIST);
 const watchlistList = new QuoteList($('#wl-rows'), {
   onSelect: (full) => activeView?.setSymbol(full),
   onRemove: (full) => setWatchlist(watchSymbols.filter((s) => s !== full)),
-  empty: 'Your watchlist is empty. Click + or ☆ in Markets to add symbols.',
+  empty: t('app.wl.empty'),
   useCredits: true,
 });
 
@@ -1023,7 +1099,7 @@ const marketsList = new MarketBrowser($('#mk-rows'), $('#mk-count'), {
   onStar: (full) => {
     const on = watchSymbols.includes(full);
     setWatchlist(on ? watchSymbols.filter((s) => s !== full) : [...watchSymbols, full]);
-    toast(on ? `Removed ${displayTicker(full)} from watchlist` : `Added ${displayTicker(full)} to watchlist`);
+    toast(on ? t('app.wl.removed', { ticker: displayTicker(full) }) : t('app.wl.added', { ticker: displayTicker(full) }));
   },
   isStarred: (full) => watchSymbols.includes(full),
 });
@@ -1034,11 +1110,11 @@ const option = (g) => `<option value="${g.id}">${esc(g.title)}${g.items ? ` (${g
 function buildMarketSelect(server) {
   // Yahoo screeners need the server; on a static site the US lists are names only and
   // prices fill in from the live stream.
-  const usLabel = server ? 'Complete markets' : 'Complete markets (US prices fill in live)';
+  const usLabel = server ? t('app.mk.complete') : t('app.mk.completeStatic');
   mkSelect.innerHTML = `
-    <optgroup label="${usLabel}">${MARKET_GROUPS.filter((g) => g.universe).map(option).join('')}</optgroup>
-    <optgroup label="Popular by region & asset">${MARKET_GROUPS.filter((g) => g.items).map(option).join('')}</optgroup>
-    ${server ? `<optgroup label="Live screeners (US)">${MARKET_GROUPS.filter((g) => g.screener).map(option).join('')}</optgroup>` : ''}`;
+    <optgroup label="${esc(usLabel)}">${MARKET_GROUPS.filter((g) => g.universe).map(option).join('')}</optgroup>
+    <optgroup label="${esc(t('app.mk.popular'))}">${MARKET_GROUPS.filter((g) => g.items).map(option).join('')}</optgroup>
+    ${server ? `<optgroup label="${esc(t('app.mk.screeners'))}">${MARKET_GROUPS.filter((g) => g.screener).map(option).join('')}</optgroup>` : ''}`;
   mkSelect.value = store.get('marketGroup', 'all:us-stocks');
   if (!mkSelect.value) mkSelect.value = 'all:us-stocks';
 }
@@ -1074,28 +1150,28 @@ async function loadMarketGroup() {
     marketsList.setRows(rows);
     const sectors = g.filterLabel ? marketsList.sectors() : [];
     mkSector.hidden = sectors.length < 2;
-    mkSector.innerHTML = `<option value="">${esc(g.filterLabel || 'All')}</option>`
-      + sectors.map(([s, n]) => `<option value="${esc(s)}">${esc(s)} (${n.toLocaleString()})</option>`).join('');
+    mkSector.innerHTML = `<option value="">${esc(g.filterLabel || t('common.all'))}</option>`
+      + sectors.map(([s, n]) => `<option value="${esc(s)}">${esc(sectorName(s))} (${n.toLocaleString(locale)})</option>`).join('');
     marketsList.setActive(activeView?.state.symbol);
   };
   if (g.items) {
     done(g.items.map((it, i, a) => ({ ...it, ticker: displayTicker(it.full), rank: a.length - i })));
     return;
   }
-  marketsList.setMessage(g.universe ? `Loading ${g.title.toLowerCase()}…` : 'Loading…');
+  marketsList.setMessage(g.universe ? t('app.mk.loading', { list: lang === 'en' ? g.title.toLowerCase() : g.title }) : t('common.loading'));
   try {
     if (g.universe) {
       done(await universeRows(g.universe));
     } else {
       const r = await fetch(apiUrl(`api/yahoo/screener?id=${encodeURIComponent(g.screener)}`));
       const rows = await r.json();
-      if (!r.ok) throw new Error(rows?.error || 'Failed');
+      if (!r.ok) throw new Error(rows?.error || t('common.error'));
       done(rows.map((q, i, a) => ({
         full: `YAHOO:${q.symbol}`, ticker: q.symbol, name: q.name, price: q.price, change: q.change, precision: q.precision, rank: a.length - i,
       })));
     }
   } catch (e) {
-    if (seq === marketsSeq) marketsList.setMessage(`Couldn't load this list: ${e.message}`);
+    if (seq === marketsSeq) marketsList.setMessage(t('app.mk.failed', { error: e.message }));
   }
 }
 mkSelect.addEventListener('change', loadMarketGroup);
@@ -1133,17 +1209,17 @@ let alertSymbol = null;
 const alerts = new AlertManager({
   evaluate: !POPOUT,
   onTrigger: (a) => {
-    const what = `${displayTicker(a.symbol)} ${CONDITIONS[a.condition].toLowerCase()} ${formatNumber(a.price, smartDecimals(a.price))}`;
+    const what = alertText(a.condition, displayTicker(a.symbol), formatNumber(a.price, smartDecimals(a.price)));
     chime();
     const card = document.createElement('div');
     card.className = 'alert-toast';
-    card.innerHTML = `<b>🔔 ${esc(what)}</b><span>Now ${esc(formatNumber(a.triggerPrice, smartDecimals(a.triggerPrice)))}${a.message ? ` · ${esc(a.message)}` : ''}</span><button aria-label="Dismiss">×</button>`;
+    card.innerHTML = `<b>🔔 ${esc(what)}</b><span>${esc(t('alert.now', { price: formatNumber(a.triggerPrice, smartDecimals(a.triggerPrice)) }))}${a.message ? ` · ${esc(a.message)}` : ''}</span><button aria-label="${esc(t('alert.dismiss'))}">×</button>`;
     card.querySelector('button').addEventListener('click', () => card.remove());
     card.addEventListener('click', (e) => { if (!e.target.closest('button')) { activeView?.setSymbol(a.symbol); card.remove(); } });
     $('#alert-toasts').prepend(card);
     setTimeout(() => card.remove(), 60000);
     if ('Notification' in window && Notification.permission === 'granted') {
-      try { new Notification(`Wickline: ${what}`, { body: a.message || `Price is now ${a.triggerPrice}`, tag: a.id }); } catch { /* ignore */ }
+      try { new Notification(`Wickline: ${what}`, { body: a.message || t('alert.notifyBody', { price: a.triggerPrice }), tag: a.id }); } catch { /* ignore */ }
     }
   },
   onChange: (items) => {
@@ -1159,16 +1235,18 @@ function renderAlerts(items = alerts.items) {
   badge.textContent = active;
   $('#al-rows').innerHTML = items.map((a) => {
     const price = formatNumber(a.price, smartDecimals(a.price));
-    const meta = a.active ? 'Active'
-      : `Triggered ${new Date(a.triggeredAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} at ${formatNumber(a.triggerPrice, smartDecimals(a.triggerPrice))}`;
+    const meta = a.active ? t('alert.active') : t('alert.triggered', {
+      time: new Date(a.triggeredAt).toLocaleString(locale, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      price: formatNumber(a.triggerPrice, smartDecimals(a.triggerPrice)),
+    });
     return `<div class="al-row${a.active ? '' : ' done'}" data-al-sym="${esc(a.symbol)}">
       <div class="al-main"><b>${esc(displayTicker(a.symbol))}</b> ${esc(CONDITIONS[a.condition])} <b>${price}</b>
         ${a.message ? `<small>${esc(a.message)}</small>` : ''}<small class="${a.active ? 'up' : 'muted'}">${esc(meta)}</small></div>
       <div class="al-actions">
-        ${a.active ? '' : `<button data-al="rearm" data-id="${a.id}" title="Restart">↻</button>`}
-        <button data-al="del" data-id="${a.id}" title="Delete" aria-label="Delete">×</button>
+        ${a.active ? '' : `<button data-al="rearm" data-id="${a.id}" title="${esc(t('alert.restart'))}">↻</button>`}
+        <button data-al="del" data-id="${a.id}" title="${esc(t('common.delete'))}" aria-label="${esc(t('common.delete'))}">×</button>
       </div></div>`;
-  }).join('') || '<div class="wl-empty">No alerts yet. Click + here, the Alert button, or the bell on a horizontal line.</div>';
+  }).join('') || `<div class="wl-empty">${esc(t('alert.empty'))}</div>`;
 }
 
 $('#al-rows').addEventListener('click', (e) => {
@@ -1212,7 +1290,7 @@ $('#alert-form').addEventListener('submit', (e) => {
   if (!alertSymbol || !Number.isFinite(price)) return;
   alerts.add({ symbol: alertSymbol, condition: $('#al-cond').value, price, message: $('#al-msg').value.trim() });
   alertModal.hidden = true;
-  toast(`Alert set: ${displayTicker(alertSymbol)} ${CONDITIONS[$('#al-cond').value].toLowerCase()} ${price}`);
+  toast(t('alert.set', { what: alertText($('#al-cond').value, displayTicker(alertSymbol), price) }));
   if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
 });
 
@@ -1222,10 +1300,10 @@ $('#alert-form').addEventListener('submit', (e) => {
 
 const search = new SymbolSearch({
   onSelect: (full, mode) => {
-    if (mode === 'add') { setWatchlist([...watchSymbols, full]); toast(`Added ${displayTicker(full)} to watchlist`); }
+    if (mode === 'add') { setWatchlist([...watchSymbols, full]); toast(t('app.wl.added', { ticker: displayTicker(full) })); }
     else if (mode === 'compare') {
-      if (activeView?.addCompare(full)) toast(`Comparing with ${displayTicker(full)} (percent scale)`);
-      else toast('That symbol is already on this chart');
+      if (activeView?.addCompare(full)) toast(t('app.cmp.on', { ticker: displayTicker(full) }));
+      else toast(t('app.cmp.dup'));
     } else if (mode === 'alert') openAlertDialog(full);
     else activeView?.setSymbol(full);
   },
@@ -1253,8 +1331,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (isTyping(e) || anyModal() || !activeView) return;
-  // Command+K on macOS / Ctrl+K elsewhere: use the existing symbol picker.
-  // Respect focused editors and open dialogs instead of stealing their shortcuts.
+  // Cmd+K on macOS / Ctrl+K on other platforms, using the built-in symbol picker.
   if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
     e.preventDefault();
     search.open('open');
@@ -1278,7 +1355,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key === '/' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); openIndicators(); return; }
-  // A digit opens "Change interval" (45 → 45 minutes, then Enter), like TradingView; tickers
+  // A digit opens "Change interval" (45 → 45 minutes, then Enter); tickers
   // starting with a digit (7203.T) go on to symbol search from there. A letter opens the search.
   if (!e.ctrlKey && !e.metaKey && !e.shiftKey && /^[0-9]$/.test(e.key)) {
     e.preventDefault();
@@ -1293,7 +1370,7 @@ document.addEventListener('keydown', (e) => {
 
 // Clock (charts show exchange time for stocks and your local time for crypto)
 function tickClock() {
-  $('#clock').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  $('#clock').textContent = new Date().toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 setInterval(tickClock, 1000);
 tickClock();
@@ -1332,7 +1409,7 @@ async function updateCheck() {
   try { current = (await (await fetch(apiUrl('api/health'))).json()).version; } catch { return; }
   const rel = await checkForUpdate({ current, dismissed: store.get('updateDismissed', null) });
   if (!rel) { box.hidden = true; return; }
-  $('#update-link').textContent = `Update available: Wickline ${rel.version}`;
+  $('#update-link').textContent = t('upd.available', { version: rel.version });
   $('#update-link').href = rel.url;
   box.hidden = false;
   $('#update-dismiss').onclick = () => { store.set('updateDismissed', rel.version); box.hidden = true; };

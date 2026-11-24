@@ -1,5 +1,7 @@
 // Custom canvas pieces drawn through the chart library's plugin interface.
 
+import { t } from './i18n.js';
+
 const DAY = 86400;
 
 /**
@@ -109,7 +111,7 @@ function fmtRemaining(s) {
   s = Math.max(0, Math.floor(s));
   const d = Math.floor(s / DAY), h = Math.floor((s % DAY) / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
   const pad = (n) => String(n).padStart(2, '0');
-  if (d > 0) return `${d}d ${h}h`;
+  if (d > 0) return t('chart.countdownDays', { d, h });
   if (h > 0) return `${h}:${pad(m)}:${pad(sec)}`;
   return `${pad(m)}:${pad(sec)}`;
 }

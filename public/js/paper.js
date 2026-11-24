@@ -1,6 +1,9 @@
 // Paper trading: a simulated account that fills market, limit and stop orders against live
 // prices (ticks) or replayed candles, with a stop loss and take profit on each position.
-// No DOM and no network, so it's unit-tested in test/paper.test.mjs.
+// No DOM and no network, so it's unit-tested in test/paper.test.mjs (in English: Node has no UI
+// language). Fill reasons ('Market', 'Stop loss'…) are ids, kept in English; trading.js shows them.
+
+import { t, locale } from './i18n.js';
 //
 // One position per symbol (netting): buying while short reduces, closes or flips the short.
 // Prices and P&L are in each instrument's own currency; the account adds them up as-is.
@@ -17,7 +20,7 @@ const round = (v, d = 10) => Math.round(v * 10 ** d) / 10 ** d; // keeps 0.1 + 0
 const finite = (v) => typeof v === 'number' && Number.isFinite(v);
 const opt = (v) => (v === '' || v == null ? null : Number(v));
 
-export const ORDER_TYPES = { market: 'Market', limit: 'Limit', stop: 'Stop' };
+export const ORDER_TYPES = { market: t('paper.type.market'), limit: t('paper.type.limit'), stop: t('paper.type.stop') };
 
 export class PaperAccount {
   /** settings: PAPER_DEFAULTS overrides; saved: a previous toJSON(). */
@@ -97,12 +100,12 @@ export class PaperAccount {
     const tp = opt(o.tp);
     const now = finite(at.price) ? at.price : this.last[symbol];
     if (finite(at.price)) this.last[symbol] = at.price;
-    if (!symbol) return { ok: false, error: 'No symbol.' };
-    if (side !== 'buy' && side !== 'sell') return { ok: false, error: 'Choose buy or sell.' };
-    if (!ORDER_TYPES[type]) return { ok: false, error: 'Unknown order type.' };
-    if (!finite(qty) || qty <= 0) return { ok: false, error: 'Enter a quantity above 0.' };
-    if (type !== 'market' && (!finite(price) || price <= 0)) return { ok: false, error: `Enter a ${type} price.` };
-    if (type === 'market' && !finite(now)) return { ok: false, error: 'No price yet for this symbol. Try again in a moment.' };
+    if (!symbol) return { ok: false, error: t('paper.err.noSymbol') };
+    if (side !== 'buy' && side !== 'sell') return { ok: false, error: t('paper.err.side') };
+    if (!ORDER_TYPES[type]) return { ok: false, error: t('paper.err.type') };
+    if (!finite(qty) || qty <= 0) return { ok: false, error: t('paper.err.qty') };
+    if (type !== 'market' && (!finite(price) || price <= 0)) return { ok: false, error: type === 'stop' ? t('paper.err.stopPrice') : t('paper.err.limitPrice') };
+    if (type === 'market' && !finite(now)) return { ok: false, error: t('paper.err.noPriceYet') };
     const marketable = type === 'market'
       || (finite(now) && (type === 'limit' ? (side === 'buy' ? now <= price : now >= price) : (side === 'buy' ? now >= price : now <= price)));
     // An order that fills now has its stops checked against the price it fills at.
@@ -134,10 +137,10 @@ export class PaperAccount {
   /** Moves a working order (e.g. dragged on the chart). Fills right away if it became marketable. */
   modifyOrder(id, changes = {}, at = {}) {
     const o = this.orders.find((x) => x.id === id);
-    if (!o) return { ok: false, error: 'That order is gone.' };
+    if (!o) return { ok: false, error: t('paper.err.orderGone') };
     const next = { ...o, ...Object.fromEntries(Object.entries(changes).map(([k, v]) => [k, k === 'qty' ? Number(v) : opt(v)])) };
-    if (!finite(next.qty) || next.qty <= 0) return { ok: false, error: 'Enter a quantity above 0.' };
-    if (!finite(next.price) || next.price <= 0) return { ok: false, error: 'Enter a price above 0.' };
+    if (!finite(next.qty) || next.qty <= 0) return { ok: false, error: t('paper.err.qty') };
+    if (!finite(next.price) || next.price <= 0) return { ok: false, error: t('paper.err.price') };
     const bad = this.checkBracket(next.side, next.price, next.sl, next.tp);
     if (bad) return { ok: false, error: bad };
     this.cancelOrder(id);
@@ -151,7 +154,7 @@ export class PaperAccount {
   /** Sets or clears the stop loss / take profit of an open position. */
   setBracket(symbol, { sl, tp } = {}) {
     const p = this.positions[symbol];
-    if (!p) return { ok: false, error: 'No open position.' };
+    if (!p) return { ok: false, error: t('paper.err.noPosition') };
     const next = { sl: sl === undefined ? p.sl : opt(sl), tp: tp === undefined ? p.tp : opt(tp) };
     const ref = this.last[symbol] ?? p.avg;
     const bad = this.checkBracket(p.qty > 0 ? 'buy' : 'sell', ref, next.sl, next.tp, true);
@@ -163,10 +166,10 @@ export class PaperAccount {
   /** Closes all (or qty of) a position at the market. */
   closePosition(symbol, at = {}) {
     const p = this.positions[symbol];
-    if (!p) return { ok: false, error: 'No open position.' };
+    if (!p) return { ok: false, error: t('paper.err.noPosition') };
     if (finite(at.price)) this.last[symbol] = at.price;
     const px = this.last[symbol];
-    if (!finite(px)) return { ok: false, error: 'No price yet for this symbol.' };
+    if (!finite(px)) return { ok: false, error: t('paper.err.noPrice') };
     const qty = Math.min(Math.abs(p.qty), finite(at.qty) && at.qty > 0 ? at.qty : Infinity);
     const side = p.qty > 0 ? 'sell' : 'buy';
     const fills = this.fill({ id: null, symbol, side, qty }, this.slip(side, px), at.time ?? null, 'Close');
@@ -219,17 +222,16 @@ export class PaperAccount {
 
   /** For a buy, the stop loss must sit below the entry and the take profit above (a sell: the reverse). */
   checkBracket(side, ref, sl, tp, existing = false) {
-    for (const [k, v] of [['Stop loss', sl], ['Take profit', tp]]) {
-      if (v != null && (!finite(v) || v <= 0)) return `${k} must be a price above 0.`;
-    }
+    if (sl != null && (!finite(sl) || sl <= 0)) return t('paper.err.slPrice');
+    if (tp != null && (!finite(tp) || tp <= 0)) return t('paper.err.tpPrice');
     if (!finite(ref)) return null;
-    const what = existing ? 'the current price' : 'the entry price';
+    // Checked against the current price (an open position) or the entry price (a new order).
     if (side === 'buy') {
-      if (sl != null && sl >= ref) return `For a long position the stop loss must be below ${what}.`;
-      if (tp != null && tp <= ref) return `For a long position the take profit must be above ${what}.`;
+      if (sl != null && sl >= ref) return existing ? t('paper.err.longSlNow') : t('paper.err.longSlEntry');
+      if (tp != null && tp <= ref) return existing ? t('paper.err.longTpNow') : t('paper.err.longTpEntry');
     } else {
-      if (sl != null && sl <= ref) return `For a short position the stop loss must be above ${what}.`;
-      if (tp != null && tp >= ref) return `For a short position the take profit must be below ${what}.`;
+      if (sl != null && sl <= ref) return existing ? t('paper.err.shortSlNow') : t('paper.err.shortSlEntry');
+      if (tp != null && tp >= ref) return existing ? t('paper.err.shortTpNow') : t('paper.err.shortTpEntry');
     }
     return null;
   }
@@ -242,8 +244,8 @@ export class PaperAccount {
     const needed = this.exposure(symbol) + Math.abs(next) * price;
     const power = Math.max(0, this.equity) * this.settings.leverage;
     if (needed > power + EPS) {
-      const fmt = (v) => v.toLocaleString('en-US', { maximumFractionDigits: 2 });
-      return `Not enough buying power: positions would total ${fmt(needed)}, the account allows ${fmt(power)} (equity × leverage ${this.settings.leverage}).`;
+      const fmt = (v) => v.toLocaleString(locale, { maximumFractionDigits: 2 });
+      return t('paper.err.buyingPower', { needed: fmt(needed), power: fmt(power), leverage: this.settings.leverage });
     }
     return null;
   }

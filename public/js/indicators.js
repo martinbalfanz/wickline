@@ -3,6 +3,7 @@
 // The math helpers are also exported as `ta` for user scripts (see script-worker.js).
 
 import { withAlpha } from './util.js';
+import { t } from './i18n.js';
 
 const isNum = Number.isFinite;
 const DAY = 86400;
@@ -844,7 +845,9 @@ export function vwapBands(bars, mult = 1) {
 // ---------------------------------------------------------------------------
 
 const P = (key, label, def, min = 1, max = 1000, step = 1) => ({ key, label, def, min, max, step });
-const SRC = (def = 'close') => ({ key: 'source', label: 'Source', def, type: 'select', options: SOURCES });
+/** What the source options show (their values stay the ids above; hl2, hlc3 and ohlc4 show as they are). */
+const SOURCE_LABELS = { close: t('ind.src.close'), open: t('ind.src.open'), high: t('ind.src.high'), low: t('ind.src.low') };
+const SRC = (def = 'close') => ({ key: 'source', label: t('ind.p.source'), def, type: 'select', options: SOURCES, optionLabels: SOURCE_LABELS });
 const levelsFill = (top, bottom, color) => ({ from: '_top', to: '_bottom', color, consts: { _top: top, _bottom: bottom } });
 /** MACD-style histogram colours: strong while moving away from zero, pale while moving back. */
 const macdHistColor = (hist, i) => {
@@ -856,7 +859,7 @@ const macdHistColor = (hist, i) => {
 /** Builds a simple single-line moving average definition. */
 const maDef = (name, short, description, len, fn) => ({
   name, short, description, category: 'Moving averages', overlay: true,
-  params: [P('length', 'Length', len), SRC()],
+  params: [P('length', t('ind.p.length'), len), SRC()],
   plots: [{ key: 'ma', title: short, color: 'auto' }],
   calc: (bars, p) => ({ ma: fn(source(bars, p.source), p.length, bars) }),
 });
@@ -865,53 +868,63 @@ export const CATEGORIES = [
   'Moving averages', 'Bands & channels', 'Trend', 'Oscillators', 'Momentum', 'Trend strength', 'Volume', 'Volatility',
 ];
 
+const CATEGORY_KEYS = {
+  'Moving averages': 'ind.cat.ma', 'Bands & channels': 'ind.cat.bands', Trend: 'ind.cat.trend', Oscillators: 'ind.cat.osc',
+  Momentum: 'ind.cat.momentum', 'Trend strength': 'ind.cat.strength', Volume: 'ind.cat.volume', Volatility: 'ind.cat.volatility',
+};
+/** A category (an English id, as in CATEGORIES and def.category) in the UI language. */
+export const categoryLabel = (c) => (CATEGORY_KEYS[c] ? t(CATEGORY_KEYS[c]) : c);
+/** The text shown for option o of a select param p; the option's value stays o. */
+export const optionLabel = (p, o) => (p.optionLabels && Object.hasOwn(p.optionLabels, o) ? p.optionLabels[o] : String(o));
+
 export const INDICATORS = {
   // --- Moving averages ------------------------------------------------------
-  sma: maDef('Moving Average (SMA)', 'SMA', 'Simple moving average', 20, sma),
-  ema: maDef('Moving Average Exponential (EMA)', 'EMA', 'Exponential moving average', 21, (s, len) => ema(s, len)),
-  wma: maDef('Moving Average Weighted (WMA)', 'WMA', 'Linearly weighted moving average', 9, wma),
-  hma: maDef('Hull Moving Average', 'HMA', 'Fast, smooth moving average with little lag', 9, hma),
-  dema: maDef('Double EMA', 'DEMA', 'Double exponential moving average', 9, dema),
-  tema: maDef('Triple EMA', 'TEMA', 'Triple exponential moving average', 9, tema),
-  smma: maDef('Smoothed Moving Average', 'SMMA', 'Wilder-smoothed average (RMA)', 7, rma),
-  vwma: maDef('Volume Weighted Moving Average', 'VWMA', 'Moving average weighted by volume', 20, (s, len, bars) => vwma(s, pick(bars, 'volume'), len)),
-  alma: maDef('Arnaud Legoux Moving Average', 'ALMA', 'Gaussian-weighted moving average', 9, (s, len) => alma(s, len)),
-  lsma: maDef('Least Squares Moving Average', 'LSMA', 'Linear regression end point', 25, (s, len) => linreg(s, len)),
+  sma: maDef(t('ind.sma.name'), 'SMA', t('ind.sma.desc'), 20, sma),
+  ema: maDef(t('ind.ema.name'), 'EMA', t('ind.ema.desc'), 21, (s, len) => ema(s, len)),
+  wma: maDef(t('ind.wma.name'), 'WMA', t('ind.wma.desc'), 9, wma),
+  hma: maDef(t('ind.hma.name'), 'HMA', t('ind.hma.desc'), 9, hma),
+  dema: maDef(t('ind.dema.name'), 'DEMA', t('ind.dema.desc'), 9, dema),
+  tema: maDef(t('ind.tema.name'), 'TEMA', t('ind.tema.desc'), 9, tema),
+  smma: maDef(t('ind.smma.name'), 'SMMA', t('ind.smma.desc'), 7, rma),
+  vwma: maDef(t('ind.vwma.name'), 'VWMA', t('ind.vwma.desc'), 20, (s, len, bars) => vwma(s, pick(bars, 'volume'), len)),
+  alma: maDef(t('ind.alma.name'), 'ALMA', t('ind.alma.desc'), 9, (s, len) => alma(s, len)),
+  lsma: maDef(t('ind.lsma.name'), 'LSMA', t('ind.lsma.desc'), 25, (s, len) => linreg(s, len)),
   macross: {
-    name: 'MA Cross', short: 'MA Cross', description: 'Fast and slow moving averages', category: 'Moving averages', overlay: true,
-    params: [P('fast', 'Fast length', 9), P('slow', 'Slow length', 21), { key: 'kind', label: 'Type', def: 'EMA', type: 'select', options: ['EMA', 'SMA'] }],
-    plots: [{ key: 'fast', title: 'Fast', color: '#00BCD4' }, { key: 'slow', title: 'Slow', color: '#FF9800' }],
+    name: t('ind.macross.name'), short: 'MA Cross', description: t('ind.macross.desc'), category: 'Moving averages', overlay: true,
+    params: [P('fast', t('ind.p.fastLength'), 9), P('slow', t('ind.p.slowLength'), 21), { key: 'kind', label: t('ind.p.type'), def: 'EMA', type: 'select', options: ['EMA', 'SMA'] }],
+    plots: [{ key: 'fast', title: t('ind.plot.fast'), color: '#00BCD4' }, { key: 'slow', title: t('ind.plot.slow'), color: '#FF9800' }],
     calc: (bars, p) => {
       const c = source(bars), f = p.kind === 'SMA' ? sma : ema;
       return { fast: f(c, p.fast), slow: f(c, p.slow) };
     },
   },
   kama: {
-    name: 'Kaufman Adaptive Moving Average', short: 'KAMA', description: 'Fast in trends, slow in noise (efficiency ratio)', category: 'Moving averages', overlay: true,
-    params: [P('length', 'ER length', 10), P('fast', 'Fast length', 2), P('slow', 'Slow length', 30), SRC()],
+    name: t('ind.kama.name'), short: 'KAMA', description: t('ind.kama.desc'), category: 'Moving averages', overlay: true,
+    params: [P('length', t('ind.p.lengthOf', { name: 'ER' }), 10), P('fast', t('ind.p.fastLength'), 2), P('slow', t('ind.p.slowLength'), 30), SRC()],
     plots: [{ key: 'ma', title: 'KAMA', color: 'auto' }],
     calc: (bars, p) => ({ ma: kama(source(bars, p.source), p.length, p.fast, p.slow) }),
   },
-  zlema: maDef('Zero Lag EMA', 'ZLEMA', 'EMA with its lag removed', 20, zlema),
+  zlema: maDef(t('ind.zlema.name'), 'ZLEMA', t('ind.zlema.desc'), 20, zlema),
   t3: {
-    name: 'Tillson T3', short: 'T3', description: 'Smooth, low-lag average of six chained EMAs', category: 'Moving averages', overlay: true,
-    params: [P('length', 'Length', 5), P('vfactor', 'Volume factor', 0.7, 0, 1, 0.05), SRC()],
+    name: t('ind.t3.name'), short: 'T3', description: t('ind.t3.desc'), category: 'Moving averages', overlay: true,
+    params: [P('length', t('ind.p.length'), 5), P('vfactor', t('ind.p.vfactor'), 0.7, 0, 1, 0.05), SRC()],
     plots: [{ key: 'ma', title: 'T3', color: 'auto' }],
     calc: (bars, p) => ({ ma: t3(source(bars, p.source), p.length, p.vfactor) }),
   },
-  mcginley: maDef('McGinley Dynamic', 'McGinley', 'Self-adjusting average that hugs price', 14, mcginley),
+  mcginley: maDef(t('ind.mcginley.name'), 'McGinley', t('ind.mcginley.desc'), 14, mcginley),
   vidya: {
-    name: 'Variable Index Dynamic Average', short: 'VIDYA', description: 'EMA whose speed follows the Chande Momentum Oscillator', category: 'Moving averages', overlay: true,
-    params: [P('length', 'Length', 9), P('cmoLength', 'CMO length', 9), SRC()],
+    name: t('ind.vidya.name'), short: 'VIDYA', description: t('ind.vidya.desc'), category: 'Moving averages', overlay: true,
+    params: [P('length', t('ind.p.length'), 9), P('cmoLength', t('ind.p.lengthOf', { name: 'CMO' }), 9), SRC()],
     plots: [{ key: 'ma', title: 'VIDYA', color: 'auto' }],
     calc: (bars, p) => ({ ma: vidya(source(bars, p.source), p.length, p.cmoLength) }),
   },
-  trima: maDef('Triangular Moving Average', 'TRIMA', 'Double-smoothed SMA weighted toward the middle', 20, trima),
+  trima: maDef(t('ind.trima.name'), 'TRIMA', t('ind.trima.desc'), 20, trima),
   maribbon: {
-    name: 'Moving Average Ribbon', short: 'MA Ribbon', description: 'Four moving averages (20, 50, 100, 200)', category: 'Moving averages', overlay: true,
+    name: t('ind.maribbon.name'), short: 'MA Ribbon', description: t('ind.maribbon.desc'), category: 'Moving averages', overlay: true,
     params: [
-      { key: 'kind', label: 'Type', def: 'EMA', type: 'select', options: ['EMA', 'SMA'] },
-      P('len1', 'MA #1 length', 20), P('len2', 'MA #2 length', 50), P('len3', 'MA #3 length', 100), P('len4', 'MA #4 length', 200), SRC(),
+      { key: 'kind', label: t('ind.p.type'), def: 'EMA', type: 'select', options: ['EMA', 'SMA'] },
+      P('len1', t('ind.p.lengthOf', { name: 'MA #1' }), 20), P('len2', t('ind.p.lengthOf', { name: 'MA #2' }), 50),
+      P('len3', t('ind.p.lengthOf', { name: 'MA #3' }), 100), P('len4', t('ind.p.lengthOf', { name: 'MA #4' }), 200), SRC(),
     ],
     plots: [
       { key: 'ma1', title: 'MA #1', color: '#F6C309', width: 1 },
@@ -925,7 +938,7 @@ export const INDICATORS = {
     },
   },
   gmma: {
-    name: 'Guppy Multiple Moving Average', short: 'GMMA', description: 'Six short-term and six long-term EMAs', category: 'Moving averages', overlay: true,
+    name: t('ind.gmma.name'), short: 'GMMA', description: t('ind.gmma.desc'), category: 'Moving averages', overlay: true,
     params: [SRC()],
     plots: [3, 5, 8, 10, 12, 15, 30, 35, 40, 45, 50, 60].map((len) => (
       { key: `e${len}`, title: `EMA ${len}`, color: len < 30 ? '#26A69A' : '#EF5350', width: 1 })),
@@ -937,23 +950,23 @@ export const INDICATORS = {
 
   // --- Bands & channels -------------------------------------------------------
   bb: {
-    name: 'Bollinger Bands', short: 'BB', description: 'SMA with bands at N standard deviations', category: 'Bands & channels', overlay: true,
-    params: [P('length', 'Length', 20), P('mult', 'StdDev', 2, 0.1, 10, 0.1), SRC()],
+    name: t('ind.bb.name'), short: 'BB', description: t('ind.bb.desc'), category: 'Bands & channels', overlay: true,
+    params: [P('length', t('ind.p.length'), 20), P('mult', t('ind.p.stdDev'), 2, 0.1, 10, 0.1), SRC()],
     plots: [
-      { key: 'upper', title: 'Upper', color: '#4FA3F7', width: 1 },
-      { key: 'basis', title: 'Basis', color: '#FF6D00', width: 1 },
-      { key: 'lower', title: 'Lower', color: '#4FA3F7', width: 1 },
+      { key: 'upper', title: t('ind.plot.upper'), color: '#4FA3F7', width: 1 },
+      { key: 'basis', title: t('ind.plot.basis'), color: '#FF6D00', width: 1 },
+      { key: 'lower', title: t('ind.plot.lower'), color: '#4FA3F7', width: 1 },
     ],
     fills: [{ from: 'upper', to: 'lower', color: 'rgba(33, 150, 243, 0.07)' }],
     calc: (bars, p) => bb(source(bars, p.source), p.length, p.mult),
   },
   keltner: {
-    name: 'Keltner Channels', short: 'KC', description: 'EMA with bands at N × ATR', category: 'Bands & channels', overlay: true,
-    params: [P('length', 'Length', 20), P('mult', 'Multiplier', 2, 0.1, 10, 0.1), P('atrLength', 'ATR length', 10)],
+    name: t('ind.keltner.name'), short: 'KC', description: t('ind.keltner.desc'), category: 'Bands & channels', overlay: true,
+    params: [P('length', t('ind.p.length'), 20), P('mult', t('ind.p.mult'), 2, 0.1, 10, 0.1), P('atrLength', t('ind.p.lengthOf', { name: 'ATR' }), 10)],
     plots: [
-      { key: 'upper', title: 'Upper', color: '#4FA3F7', width: 1 },
-      { key: 'basis', title: 'Basis', color: '#4FA3F7', width: 1 },
-      { key: 'lower', title: 'Lower', color: '#4FA3F7', width: 1 },
+      { key: 'upper', title: t('ind.plot.upper'), color: '#4FA3F7', width: 1 },
+      { key: 'basis', title: t('ind.plot.basis'), color: '#4FA3F7', width: 1 },
+      { key: 'lower', title: t('ind.plot.lower'), color: '#4FA3F7', width: 1 },
     ],
     fills: [{ from: 'upper', to: 'lower', color: 'rgba(33, 150, 243, 0.07)' }],
     calc: (bars, p) => {
@@ -962,12 +975,12 @@ export const INDICATORS = {
     },
   },
   donchian: {
-    name: 'Donchian Channels', short: 'DC', description: 'Highest high and lowest low over N bars', category: 'Bands & channels', overlay: true,
-    params: [P('length', 'Length', 20)],
+    name: t('ind.donchian.name'), short: 'DC', description: t('ind.donchian.desc'), category: 'Bands & channels', overlay: true,
+    params: [P('length', t('ind.p.length'), 20)],
     plots: [
-      { key: 'upper', title: 'Upper', color: '#4FA3F7', width: 1 },
-      { key: 'basis', title: 'Basis', color: '#FF6D00', width: 1 },
-      { key: 'lower', title: 'Lower', color: '#4FA3F7', width: 1 },
+      { key: 'upper', title: t('ind.plot.upper'), color: '#4FA3F7', width: 1 },
+      { key: 'basis', title: t('ind.plot.basis'), color: '#FF6D00', width: 1 },
+      { key: 'lower', title: t('ind.plot.lower'), color: '#4FA3F7', width: 1 },
     ],
     fills: [{ from: 'upper', to: 'lower', color: 'rgba(33, 150, 243, 0.07)' }],
     calc: (bars, p) => {
@@ -976,12 +989,12 @@ export const INDICATORS = {
     },
   },
   envelopes: {
-    name: 'Envelopes', short: 'Env', description: 'Moving average with bands at ±N percent', category: 'Bands & channels', overlay: true,
-    params: [P('length', 'Length', 20), P('percent', 'Percent', 10, 0.1, 100, 0.1)],
+    name: t('ind.envelopes.name'), short: 'Env', description: t('ind.envelopes.desc'), category: 'Bands & channels', overlay: true,
+    params: [P('length', t('ind.p.length'), 20), P('percent', t('ind.p.percent'), 10, 0.1, 100, 0.1)],
     plots: [
-      { key: 'upper', title: 'Upper', color: '#4FA3F7', width: 1 },
-      { key: 'basis', title: 'Basis', color: '#FF6D00', width: 1 },
-      { key: 'lower', title: 'Lower', color: '#4FA3F7', width: 1 },
+      { key: 'upper', title: t('ind.plot.upper'), color: '#4FA3F7', width: 1 },
+      { key: 'basis', title: t('ind.plot.basis'), color: '#FF6D00', width: 1 },
+      { key: 'lower', title: t('ind.plot.lower'), color: '#4FA3F7', width: 1 },
     ],
     fills: [{ from: 'upper', to: 'lower', color: 'rgba(33, 150, 243, 0.07)' }],
     calc: (bars, p) => {
@@ -990,36 +1003,36 @@ export const INDICATORS = {
     },
   },
   starc: {
-    name: 'STARC Bands', short: 'STARC', description: 'Short SMA with bands at N × ATR (Stoller)', category: 'Bands & channels', overlay: true,
-    params: [P('length', 'SMA length', 6), P('atrLength', 'ATR length', 15), P('mult', 'Multiplier', 2, 0.1, 10, 0.1)],
+    name: t('ind.starc.name'), short: 'STARC', description: t('ind.starc.desc'), category: 'Bands & channels', overlay: true,
+    params: [P('length', t('ind.p.lengthOf', { name: 'SMA' }), 6), P('atrLength', t('ind.p.lengthOf', { name: 'ATR' }), 15), P('mult', t('ind.p.mult'), 2, 0.1, 10, 0.1)],
     plots: [
-      { key: 'upper', title: 'Upper', color: '#4FA3F7', width: 1 },
-      { key: 'basis', title: 'Basis', color: '#FF6D00', width: 1 },
-      { key: 'lower', title: 'Lower', color: '#4FA3F7', width: 1 },
+      { key: 'upper', title: t('ind.plot.upper'), color: '#4FA3F7', width: 1 },
+      { key: 'basis', title: t('ind.plot.basis'), color: '#FF6D00', width: 1 },
+      { key: 'lower', title: t('ind.plot.lower'), color: '#4FA3F7', width: 1 },
     ],
     fills: [{ from: 'upper', to: 'lower', color: 'rgba(33, 150, 243, 0.07)' }],
     calc: (bars, p) => starc(bars, p.length, p.atrLength, p.mult),
   },
   sebands: {
-    name: 'Standard Error Bands', short: 'SE Bands', description: 'Linear regression ± N standard errors, smoothed', category: 'Bands & channels', overlay: true,
-    params: [P('length', 'Length', 21, 3), P('mult', 'Standard errors', 2, 0.1, 10, 0.1), P('smooth', 'Smoothing', 3), SRC()], // a standard error needs 3 points
+    name: t('ind.sebands.name'), short: 'SE Bands', description: t('ind.sebands.desc'), category: 'Bands & channels', overlay: true,
+    params: [P('length', t('ind.p.length'), 21, 3), P('mult', t('ind.p.stdErrors'), 2, 0.1, 10, 0.1), P('smooth', t('ind.p.smoothing'), 3), SRC()], // a standard error needs 3 points
     plots: [
-      { key: 'upper', title: 'Upper', color: '#4FA3F7', width: 1 },
-      { key: 'basis', title: 'Basis', color: '#FF6D00', width: 1 },
-      { key: 'lower', title: 'Lower', color: '#4FA3F7', width: 1 },
+      { key: 'upper', title: t('ind.plot.upper'), color: '#4FA3F7', width: 1 },
+      { key: 'basis', title: t('ind.plot.basis'), color: '#FF6D00', width: 1 },
+      { key: 'lower', title: t('ind.plot.lower'), color: '#4FA3F7', width: 1 },
     ],
     fills: [{ from: 'upper', to: 'lower', color: 'rgba(33, 150, 243, 0.07)' }],
     calc: (bars, p) => stderrBands(source(bars, p.source), p.length, p.mult, p.smooth),
   },
   vwapbands: {
-    name: 'VWAP with Standard Deviation Bands', short: 'VWAP Bands', description: 'Daily VWAP with bands at ±N volume-weighted standard deviations', category: 'Bands & channels', overlay: true,
-    params: [P('mult1', 'Band #1 multiplier', 1, 0.1, 10, 0.1), P('mult2', 'Band #2 multiplier', 2, 0.1, 10, 0.1)],
+    name: t('ind.vwapbands.name'), short: 'VWAP Bands', description: t('ind.vwapbands.desc'), category: 'Bands & channels', overlay: true,
+    params: [P('mult1', t('ind.p.bandMult', { n: 1 }), 1, 0.1, 10, 0.1), P('mult2', t('ind.p.bandMult', { n: 2 }), 2, 0.1, 10, 0.1)],
     plots: [
-      { key: 'upper2', title: 'Upper #2', color: '#43A047', width: 1 },
-      { key: 'upper1', title: 'Upper #1', color: '#4FA3F7', width: 1 },
+      { key: 'upper2', title: t('ind.plot.upperN', { n: 2 }), color: '#43A047', width: 1 },
+      { key: 'upper1', title: t('ind.plot.upperN', { n: 1 }), color: '#4FA3F7', width: 1 },
       { key: 'vwap', title: 'VWAP', color: '#E040FB' },
-      { key: 'lower1', title: 'Lower #1', color: '#4FA3F7', width: 1 },
-      { key: 'lower2', title: 'Lower #2', color: '#43A047', width: 1 },
+      { key: 'lower1', title: t('ind.plot.lowerN', { n: 1 }), color: '#4FA3F7', width: 1 },
+      { key: 'lower2', title: t('ind.plot.lowerN', { n: 2 }), color: '#43A047', width: 1 },
     ],
     fills: [{ from: 'upper1', to: 'lower1', color: 'rgba(33, 150, 243, 0.07)' }],
     calc: (bars, p) => {
@@ -1031,11 +1044,11 @@ export const INDICATORS = {
 
   // --- Trend ----------------------------------------------------------------------
   supertrend: {
-    name: 'Supertrend', short: 'Supertrend', description: 'ATR-based trend-following stop line', category: 'Trend', overlay: true,
-    params: [P('length', 'ATR length', 10), P('factor', 'Factor', 3, 0.1, 20, 0.1)],
+    name: t('ind.supertrend.name'), short: 'Supertrend', description: t('ind.supertrend.desc'), category: 'Trend', overlay: true,
+    params: [P('length', t('ind.p.lengthOf', { name: 'ATR' }), 10), P('factor', t('ind.p.factor'), 3, 0.1, 20, 0.1)],
     plots: [
-      { key: 'up', title: 'Up trend', color: UP, optional: true },
-      { key: 'down', title: 'Down trend', color: DOWN, optional: true },
+      { key: 'up', title: t('ind.plot.upTrend'), color: UP, optional: true },
+      { key: 'down', title: t('ind.plot.downTrend'), color: DOWN, optional: true },
     ],
     calc: (bars, p) => {
       const { value, direction } = supertrend(bars, p.factor, p.length);
@@ -1046,14 +1059,14 @@ export const INDICATORS = {
     },
   },
   ichimoku: {
-    name: 'Ichimoku Cloud', short: 'Ichimoku', description: 'Conversion, base, lagging span and cloud', category: 'Trend', overlay: true, hideLastValue: true,
-    params: [P('conversion', 'Conversion length', 9), P('base', 'Base length', 26), P('spanB', 'Span B length', 52), P('displacement', 'Displacement', 26)],
+    name: t('ind.ichimoku.name'), short: 'Ichimoku', description: t('ind.ichimoku.desc'), category: 'Trend', overlay: true, hideLastValue: true,
+    params: [P('conversion', t('ind.p.conversionLength'), 9), P('base', t('ind.p.baseLength'), 26), P('spanB', t('ind.p.spanBLength'), 52), P('displacement', t('ind.p.displacement'), 26)],
     plots: [
-      { key: 'conversion', title: 'Conversion', color: '#4FA3F7', width: 1 },
-      { key: 'base', title: 'Base', color: '#B71C1C', width: 1 },
-      { key: 'lagging', title: 'Lagging span', color: '#43A047', width: 1 },
-      { key: 'spanA', title: 'Leading span A', color: '#A5D6A7', width: 1 },
-      { key: 'spanB', title: 'Leading span B', color: '#EF9A9A', width: 1 },
+      { key: 'conversion', title: t('ind.plot.conversion'), color: '#4FA3F7', width: 1 },
+      { key: 'base', title: t('ind.plot.base'), color: '#B71C1C', width: 1 },
+      { key: 'lagging', title: t('ind.plot.lagging'), color: '#43A047', width: 1 },
+      { key: 'spanA', title: t('ind.plot.leadingA'), color: '#A5D6A7', width: 1 },
+      { key: 'spanB', title: t('ind.plot.leadingB'), color: '#EF9A9A', width: 1 },
     ],
     fills: [{ from: 'spanA', to: 'spanB', colors: ['rgba(67, 160, 71, 0.12)', 'rgba(244, 67, 54, 0.12)'] }],
     calc: (bars, p) => {
@@ -1070,20 +1083,23 @@ export const INDICATORS = {
     },
   },
   psar: {
-    name: 'Parabolic SAR', short: 'SAR', description: 'Stop-and-reverse dots that trail the trend', category: 'Trend', overlay: true,
-    params: [P('start', 'Start', 0.02, 0.001, 1, 0.001), P('inc', 'Increment', 0.02, 0.001, 1, 0.001), P('max', 'Maximum', 0.2, 0.01, 1, 0.01)],
+    name: t('ind.psar.name'), short: 'SAR', description: t('ind.psar.desc'), category: 'Trend', overlay: true,
+    params: [P('start', t('ind.p.start'), 0.02, 0.001, 1, 0.001), P('inc', t('ind.p.increment'), 0.02, 0.001, 1, 0.001), P('max', t('ind.p.maximum'), 0.2, 0.01, 1, 0.01)],
     plots: [{ key: 'sar', title: 'SAR', type: 'dots', colorFn: (i, out) => (out.dir[i] === 1 ? UP : DOWN) }],
     calc: (bars, p) => psar(bars, p.start, p.inc, p.max),
   },
   vwap: {
-    name: 'VWAP', short: 'VWAP', description: 'Volume-weighted average price, resets each day', category: 'Trend', overlay: true,
+    name: t('ind.vwap.name'), short: 'VWAP', description: t('ind.vwap.desc'), category: 'Trend', overlay: true,
     params: [],
     plots: [{ key: 'vwap', title: 'VWAP', color: '#4FA3F7' }],
     calc: (bars) => ({ vwap: vwap(bars) }),
   },
   pivots: {
-    name: 'Pivot Points Standard', short: 'Pivots', description: 'Support and resistance from the previous period', category: 'Trend', overlay: true, hideLastValue: true,
-    params: [{ key: 'kind', label: 'Type', def: 'Traditional', type: 'select', options: ['Traditional', 'Fibonacci'] }],
+    name: t('ind.pivots.name'), short: 'Pivots', description: t('ind.pivots.desc'), category: 'Trend', overlay: true, hideLastValue: true,
+    params: [{
+      key: 'kind', label: t('ind.p.type'), def: 'Traditional', type: 'select', options: ['Traditional', 'Fibonacci'],
+      optionLabels: { Traditional: t('ind.opt.traditional'), Fibonacci: t('ind.opt.fibonacci') },
+    }],
     plots: [
       { key: 'r3', title: 'R3', color: '#EC5246', width: 1, type: 'step' },
       { key: 'r2', title: 'R2', color: '#EC5246', width: 1, type: 'step' },
@@ -1127,50 +1143,50 @@ export const INDICATORS = {
     },
   },
   alligator: {
-    name: 'Williams Alligator', short: 'Alligator', description: 'Jaw, teeth and lips: three shifted smoothed averages', category: 'Trend', overlay: true,
+    name: t('ind.alligator.name'), short: 'Alligator', description: t('ind.alligator.desc'), category: 'Trend', overlay: true,
     params: [
-      P('jaw', 'Jaw length', 13), P('jawOffset', 'Jaw offset', 8, 0, 100), P('teeth', 'Teeth length', 8),
-      P('teethOffset', 'Teeth offset', 5, 0, 100), P('lips', 'Lips length', 5), P('lipsOffset', 'Lips offset', 3, 0, 100),
+      P('jaw', t('ind.p.jawLength'), 13), P('jawOffset', t('ind.p.jawOffset'), 8, 0, 100), P('teeth', t('ind.p.teethLength'), 8),
+      P('teethOffset', t('ind.p.teethOffset'), 5, 0, 100), P('lips', t('ind.p.lipsLength'), 5), P('lipsOffset', t('ind.p.lipsOffset'), 3, 0, 100),
     ],
     plots: [
-      { key: 'jaw', title: 'Jaw', color: '#2962FF' },
-      { key: 'teeth', title: 'Teeth', color: '#E91E63' },
-      { key: 'lips', title: 'Lips', color: '#66BB6A' },
+      { key: 'jaw', title: t('ind.plot.jaw'), color: '#2962FF' },
+      { key: 'teeth', title: t('ind.plot.teeth'), color: '#E91E63' },
+      { key: 'lips', title: t('ind.plot.lips'), color: '#66BB6A' },
     ],
     calc: (bars, p) => alligator(bars, p.jaw, p.jawOffset, p.teeth, p.teethOffset, p.lips, p.lipsOffset),
   },
   chandelier: {
-    name: 'Chandelier Exit', short: 'Chandelier', description: 'ATR trailing stops from the highest high and lowest low', category: 'Trend', overlay: true,
-    params: [P('length', 'Length', 22), P('mult', 'ATR multiplier', 3, 0.1, 20, 0.1)],
-    plots: [{ key: 'long', title: 'Long stop', color: '#26A69A', width: 1 }, { key: 'short', title: 'Short stop', color: '#EF5350', width: 1 }],
+    name: t('ind.chandelier.name'), short: 'Chandelier', description: t('ind.chandelier.desc'), category: 'Trend', overlay: true,
+    params: [P('length', t('ind.p.length'), 22), P('mult', t('ind.p.multOf', { name: 'ATR' }), 3, 0.1, 20, 0.1)],
+    plots: [{ key: 'long', title: t('ind.plot.longStop'), color: '#26A69A', width: 1 }, { key: 'short', title: t('ind.plot.shortStop'), color: '#EF5350', width: 1 }],
     calc: (bars, p) => chandelier(bars, p.length, p.mult),
   },
   ckstop: {
-    name: 'Chande Kroll Stop', short: 'CK Stop', description: 'Volatility stops from the ATR and recent extremes', category: 'Trend', overlay: true,
-    params: [P('p', 'ATR length', 10), P('x', 'ATR multiplier', 1, 0.1, 20, 0.1), P('q', 'Stop length', 9)],
-    plots: [{ key: 'stopLong', title: 'Stop long', color: '#2962FF', width: 1 }, { key: 'stopShort', title: 'Stop short', color: '#FF6D00', width: 1 }],
+    name: t('ind.ckstop.name'), short: 'CK Stop', description: t('ind.ckstop.desc'), category: 'Trend', overlay: true,
+    params: [P('p', t('ind.p.lengthOf', { name: 'ATR' }), 10), P('x', t('ind.p.multOf', { name: 'ATR' }), 1, 0.1, 20, 0.1), P('q', t('ind.p.stopLength'), 9)],
+    plots: [{ key: 'stopLong', title: t('ind.plot.longStop'), color: '#2962FF', width: 1 }, { key: 'stopShort', title: t('ind.plot.shortStop'), color: '#FF6D00', width: 1 }],
     calc: (bars, p) => chandeKroll(bars, p.p, p.x, p.q),
   },
   ssl: {
-    name: 'SSL Channel', short: 'SSL', description: 'SMA of highs and lows that flips with the trend', category: 'Trend', overlay: true,
-    params: [P('length', 'Length', 10)],
-    plots: [{ key: 'up', title: 'Up', color: '#26A69A' }, { key: 'down', title: 'Down', color: '#EF5350' }],
+    name: t('ind.ssl.name'), short: 'SSL', description: t('ind.ssl.desc'), category: 'Trend', overlay: true,
+    params: [P('length', t('ind.p.length'), 10)],
+    plots: [{ key: 'up', title: t('ind.plot.up'), color: '#26A69A' }, { key: 'down', title: t('ind.plot.down'), color: '#EF5350' }],
     fills: [{ from: 'up', to: 'down', colors: ['rgba(38, 166, 154, 0.1)', 'rgba(239, 83, 80, 0.1)'] }],
     calc: (bars, p) => ssl(bars, p.length),
   },
 
   // --- Oscillators ------------------------------------------------------------------
   rsi: {
-    name: 'Relative Strength Index', short: 'RSI', description: 'Momentum oscillator, 0–100', category: 'Oscillators', overlay: false, precision: 2,
-    params: [P('length', 'Length', 14), SRC()],
+    name: t('ind.rsi.name'), short: 'RSI', description: t('ind.rsi.desc'), category: 'Oscillators', overlay: false, precision: 2,
+    params: [P('length', t('ind.p.length'), 14), SRC()],
     levels: [70, 30],
     fills: [levelsFill(70, 30, 'rgba(126, 87, 194, 0.08)')],
     plots: [{ key: 'rsi', title: 'RSI', color: '#7E57C2' }],
     calc: (bars, p) => ({ rsi: rsi(source(bars, p.source), p.length) }),
   },
   stochrsi: {
-    name: 'Stochastic RSI', short: 'Stoch RSI', description: 'Stochastic applied to RSI', category: 'Oscillators', overlay: false, precision: 2,
-    params: [P('k', 'K', 3), P('d', 'D', 3), P('rsiLength', 'RSI length', 14), P('stochLength', 'Stochastic length', 14)],
+    name: t('ind.stochrsi.name'), short: 'Stoch RSI', description: t('ind.stochrsi.desc'), category: 'Oscillators', overlay: false, precision: 2,
+    params: [P('k', 'K', 3), P('d', 'D', 3), P('rsiLength', t('ind.p.lengthOf', { name: 'RSI' }), 14), P('stochLength', t('ind.p.stochLength'), 14)],
     levels: [80, 20],
     fills: [levelsFill(80, 20, 'rgba(33, 150, 243, 0.07)')],
     plots: [{ key: 'k', title: 'K', color: '#4FA3F7' }, { key: 'd', title: 'D', color: '#FF6D00' }],
@@ -1181,8 +1197,8 @@ export const INDICATORS = {
     },
   },
   stoch: {
-    name: 'Stochastic', short: 'Stoch', description: 'Close relative to the recent high–low range', category: 'Oscillators', overlay: false, precision: 2,
-    params: [P('length', '%K length', 14), P('smooth', '%K smoothing', 3), P('d', '%D smoothing', 3)],
+    name: t('ind.stoch.name'), short: 'Stoch', description: t('ind.stoch.desc'), category: 'Oscillators', overlay: false, precision: 2,
+    params: [P('length', t('ind.p.lengthOf', { name: '%K' }), 14), P('smooth', t('ind.p.smoothingOf', { name: '%K' }), 3), P('d', t('ind.p.smoothingOf', { name: '%D' }), 3)],
     levels: [80, 20],
     fills: [levelsFill(80, 20, 'rgba(33, 150, 243, 0.07)')],
     plots: [{ key: 'k', title: '%K', color: '#4FA3F7' }, { key: 'd', title: '%D', color: '#FF6D00' }],
@@ -1192,32 +1208,32 @@ export const INDICATORS = {
     },
   },
   cci: {
-    name: 'Commodity Channel Index', short: 'CCI', description: 'Distance of price from its average', category: 'Oscillators', overlay: false, precision: 2,
-    params: [P('length', 'Length', 20), SRC('hlc3')],
+    name: t('ind.cci.name'), short: 'CCI', description: t('ind.cci.desc'), category: 'Oscillators', overlay: false, precision: 2,
+    params: [P('length', t('ind.p.length'), 20), SRC('hlc3')],
     levels: [100, -100],
     fills: [levelsFill(100, -100, 'rgba(33, 150, 243, 0.07)')],
     plots: [{ key: 'cci', title: 'CCI', color: '#4FA3F7' }],
     calc: (bars, p) => ({ cci: cci(source(bars, p.source), p.length) }),
   },
   willr: {
-    name: 'Williams %R', short: '%R', description: 'Close within the recent range, 0 to −100', category: 'Oscillators', overlay: false, precision: 2,
-    params: [P('length', 'Length', 14)],
+    name: t('ind.willr.name'), short: '%R', description: t('ind.willr.desc'), category: 'Oscillators', overlay: false, precision: 2,
+    params: [P('length', t('ind.p.length'), 14)],
     levels: [-20, -80],
     fills: [levelsFill(-20, -80, 'rgba(126, 87, 194, 0.08)')],
     plots: [{ key: 'r', title: '%R', color: '#7E57C2' }],
     calc: (bars, p) => ({ r: wpr(bars, p.length) }),
   },
   mfi: {
-    name: 'Money Flow Index', short: 'MFI', description: 'Volume-weighted RSI', category: 'Oscillators', overlay: false, precision: 2,
-    params: [P('length', 'Length', 14)],
+    name: t('ind.mfi.name'), short: 'MFI', description: t('ind.mfi.desc'), category: 'Oscillators', overlay: false, precision: 2,
+    params: [P('length', t('ind.p.length'), 14)],
     levels: [80, 20],
     fills: [levelsFill(80, 20, 'rgba(126, 87, 194, 0.08)')],
     plots: [{ key: 'mfi', title: 'MF', color: '#7E57C2' }],
     calc: (bars, p) => ({ mfi: mfi(bars, p.length) }),
   },
   uo: {
-    name: 'Ultimate Oscillator', short: 'UO', description: 'Buying pressure across three timeframes', category: 'Oscillators', overlay: false, precision: 2,
-    params: [P('fast', 'Fast', 7), P('middle', 'Middle', 14), P('slow', 'Slow', 28)],
+    name: t('ind.uo.name'), short: 'UO', description: t('ind.uo.desc'), category: 'Oscillators', overlay: false, precision: 2,
+    params: [P('fast', t('ind.p.fast'), 7), P('middle', t('ind.p.middle'), 14), P('slow', t('ind.p.slow'), 28)],
     plots: [{ key: 'uo', title: 'UO', color: '#F44336' }],
     calc: (bars, p) => {
       const bp = bars.map((b, i) => b.close - Math.min(b.low, i ? bars[i - 1].close : b.low));
@@ -1228,8 +1244,8 @@ export const INDICATORS = {
     },
   },
   cmo: {
-    name: 'Chande Momentum Oscillator', short: 'CMO', description: 'Net up vs down moves, −100 to 100', category: 'Oscillators', overlay: false, precision: 2,
-    params: [P('length', 'Length', 9)],
+    name: t('ind.cmo.name'), short: 'CMO', description: t('ind.cmo.desc'), category: 'Oscillators', overlay: false, precision: 2,
+    params: [P('length', t('ind.p.length'), 9)],
     levels: [50, -50],
     plots: [{ key: 'cmo', title: 'CMO', color: '#4FA3F7' }],
     calc: (bars, p) => {
@@ -1239,10 +1255,10 @@ export const INDICATORS = {
     },
   },
   fisher: {
-    name: 'Fisher Transform', short: 'Fisher', description: 'Turns prices into a near-normal distribution', category: 'Oscillators', overlay: false, precision: 2,
-    params: [P('length', 'Length', 9)],
+    name: t('ind.fisher.name'), short: 'Fisher', description: t('ind.fisher.desc'), category: 'Oscillators', overlay: false, precision: 2,
+    params: [P('length', t('ind.p.length'), 9)],
     levels: [1.5, 0, -1.5],
-    plots: [{ key: 'fisher', title: 'Fisher', color: '#4FA3F7' }, { key: 'trigger', title: 'Trigger', color: '#FF6D00' }],
+    plots: [{ key: 'fisher', title: 'Fisher', color: '#4FA3F7' }, { key: 'trigger', title: t('ind.plot.trigger'), color: '#FF6D00' }],
     calc: (bars, p) => {
       const h = source(bars, 'hl2'), hh = highest(h, p.length), ll = lowest(h, p.length);
       const fisher = nanArray(bars.length), trigger = nanArray(bars.length);
@@ -1260,10 +1276,10 @@ export const INDICATORS = {
     },
   },
   tsi: {
-    name: 'True Strength Index', short: 'TSI', description: 'Double-smoothed momentum', category: 'Oscillators', overlay: false, precision: 2,
-    params: [P('long', 'Long length', 25), P('short', 'Short length', 13), P('signal', 'Signal length', 13)],
+    name: t('ind.tsi.name'), short: 'TSI', description: t('ind.tsi.desc'), category: 'Oscillators', overlay: false, precision: 2,
+    params: [P('long', t('ind.p.longLength'), 25), P('short', t('ind.p.shortLength'), 13), P('signal', t('ind.p.signalLength'), 13)],
     levels: [0],
-    plots: [{ key: 'tsi', title: 'TSI', color: '#4FA3F7' }, { key: 'signal', title: 'Signal', color: '#EC5246' }],
+    plots: [{ key: 'tsi', title: 'TSI', color: '#4FA3F7' }, { key: 'signal', title: t('ind.plot.signal'), color: '#EC5246' }],
     calc: (bars, p) => {
       const pc = change(source(bars));
       const ds = ema(ema(pc, p.long), p.short), dsa = ema(ema(pc.map(Math.abs), p.long), p.short);
@@ -1272,8 +1288,8 @@ export const INDICATORS = {
     },
   },
   trix: {
-    name: 'TRIX', short: 'TRIX', description: 'Rate of change of a triple-smoothed EMA', category: 'Oscillators', overlay: false, precision: 2,
-    params: [P('length', 'Length', 18)],
+    name: t('ind.trix.name'), short: 'TRIX', description: t('ind.trix.desc'), category: 'Oscillators', overlay: false, precision: 2,
+    params: [P('length', t('ind.p.length'), 18)],
     levels: [0],
     plots: [{ key: 'trix', title: 'TRIX', color: '#EC5246' }],
     calc: (bars, p) => {
@@ -1282,8 +1298,8 @@ export const INDICATORS = {
     },
   },
   dpo: {
-    name: 'Detrended Price Oscillator', short: 'DPO', description: 'Price minus a displaced moving average', category: 'Oscillators', overlay: false,
-    params: [P('length', 'Length', 21)],
+    name: t('ind.dpo.name'), short: 'DPO', description: t('ind.dpo.desc'), category: 'Oscillators', overlay: false,
+    params: [P('length', t('ind.p.length'), 21)],
     levels: [0],
     plots: [{ key: 'dpo', title: 'DPO', color: '#43A047' }],
     calc: (bars, p) => {
@@ -1292,8 +1308,8 @@ export const INDICATORS = {
     },
   },
   coppock: {
-    name: 'Coppock Curve', short: 'Coppock', description: 'Long-term momentum (WMA of two ROCs)', category: 'Oscillators', overlay: false, precision: 2,
-    params: [P('wma', 'WMA length', 10), P('longRoc', 'Long ROC', 14), P('shortRoc', 'Short ROC', 11)],
+    name: t('ind.coppock.name'), short: 'Coppock', description: t('ind.coppock.desc'), category: 'Oscillators', overlay: false, precision: 2,
+    params: [P('wma', t('ind.p.lengthOf', { name: 'WMA' }), 10), P('longRoc', t('ind.p.longRoc'), 14), P('shortRoc', t('ind.p.shortRoc'), 11)],
     levels: [0],
     plots: [{ key: 'c', title: 'Coppock', color: '#4FA3F7' }],
     calc: (bars, p) => {
@@ -1302,8 +1318,8 @@ export const INDICATORS = {
     },
   },
   bbpct: {
-    name: 'Bollinger Bands %B', short: '%B', description: 'Where price sits within the bands', category: 'Oscillators', overlay: false, precision: 2,
-    params: [P('length', 'Length', 20), P('mult', 'StdDev', 2, 0.1, 10, 0.1)],
+    name: t('ind.bbpct.name'), short: '%B', description: t('ind.bbpct.desc'), category: 'Oscillators', overlay: false, precision: 2,
+    params: [P('length', t('ind.p.length'), 20), P('mult', t('ind.p.stdDev'), 2, 0.1, 10, 0.1)],
     levels: [1, 0],
     fills: [levelsFill(1, 0, 'rgba(38, 166, 154, 0.08)')],
     plots: [{ key: 'b', title: '%B', color: '#26A69A' }],
@@ -1313,53 +1329,59 @@ export const INDICATORS = {
     },
   },
   stc: {
-    name: 'Schaff Trend Cycle', short: 'STC', description: 'MACD run through a double stochastic, 0–100', category: 'Oscillators', overlay: false, precision: 2,
-    params: [P('length', 'Cycle length', 10, 2), P('fast', 'Fast length', 23), P('slow', 'Slow length', 50), P('factor', 'Factor', 0.5, 0.01, 1, 0.01), SRC()],
+    name: t('ind.stc.name'), short: 'STC', description: t('ind.stc.desc'), category: 'Oscillators', overlay: false, precision: 2,
+    params: [
+      P('length', t('ind.p.cycleLength'), 10, 2), P('fast', t('ind.p.fastLength'), 23), P('slow', t('ind.p.slowLength'), 50),
+      P('factor', t('ind.p.factor'), 0.5, 0.01, 1, 0.01), SRC(),
+    ],
     levels: [75, 25],
     fills: [levelsFill(75, 25, 'rgba(33, 150, 243, 0.07)')],
     plots: [{ key: 'stc', title: 'STC', color: '#26A69A' }],
     calc: (bars, p) => ({ stc: stc(source(bars, p.source), p.length, p.fast, p.slow, p.factor) }),
   },
   rvgi: {
-    name: 'Relative Vigor Index', short: 'RVGI', description: 'Close−open vs high−low, with a signal line', category: 'Oscillators', overlay: false, precision: 3,
-    params: [P('length', 'Length', 10)],
+    name: t('ind.rvgi.name'), short: 'RVGI', description: t('ind.rvgi.desc'), category: 'Oscillators', overlay: false, precision: 3,
+    params: [P('length', t('ind.p.length'), 10)],
     levels: [0],
-    plots: [{ key: 'rvgi', title: 'RVGI', color: '#26A69A' }, { key: 'signal', title: 'Signal', color: '#EF5350' }],
+    plots: [{ key: 'rvgi', title: 'RVGI', color: '#26A69A' }, { key: 'signal', title: t('ind.plot.signal'), color: '#EF5350' }],
     calc: (bars, p) => rvgi(bars, p.length),
   },
   smi: {
-    name: 'Stochastic Momentum Index', short: 'SMI', description: 'Close vs the middle of the recent range, −100 to 100', category: 'Oscillators', overlay: false, precision: 2,
-    params: [P('length', '%K length', 10), P('smoothK', 'First smoothing', 3), P('smoothD', 'Second smoothing', 3), P('signal', 'Signal length', 10)],
+    name: t('ind.smi.name'), short: 'SMI', description: t('ind.smi.desc'), category: 'Oscillators', overlay: false, precision: 2,
+    params: [
+      P('length', t('ind.p.lengthOf', { name: '%K' }), 10), P('smoothK', t('ind.p.firstSmoothing'), 3),
+      P('smoothD', t('ind.p.secondSmoothing'), 3), P('signal', t('ind.p.signalLength'), 10),
+    ],
     levels: [40, -40],
     fills: [levelsFill(40, -40, 'rgba(33, 150, 243, 0.07)')],
-    plots: [{ key: 'smi', title: 'SMI', color: '#4FA3F7' }, { key: 'signal', title: 'Signal', color: '#FF6D00' }],
+    plots: [{ key: 'smi', title: 'SMI', color: '#4FA3F7' }, { key: 'signal', title: t('ind.plot.signal'), color: '#FF6D00' }],
     calc: (bars, p) => smi(bars, p.length, p.smoothK, p.smoothD, p.signal),
   },
   crsi: {
-    name: 'Connors RSI', short: 'CRSI', description: 'Average of RSI, streak RSI and percent rank of returns', category: 'Oscillators', overlay: false, precision: 2,
-    params: [P('rsiLength', 'RSI length', 3), P('streakLength', 'Streak RSI length', 2), P('rankLength', 'Percent rank length', 100), SRC()],
+    name: t('ind.crsi.name'), short: 'CRSI', description: t('ind.crsi.desc'), category: 'Oscillators', overlay: false, precision: 2,
+    params: [P('rsiLength', t('ind.p.lengthOf', { name: 'RSI' }), 3), P('streakLength', t('ind.p.streakLength'), 2), P('rankLength', t('ind.p.rankLength'), 100), SRC()],
     levels: [90, 10],
     fills: [levelsFill(90, 10, 'rgba(126, 87, 194, 0.08)')],
     plots: [{ key: 'crsi', title: 'CRSI', color: '#7E57C2' }],
     calc: (bars, p) => ({ crsi: connorsRsi(source(bars, p.source), p.rsiLength, p.streakLength, p.rankLength) }),
   },
   laguerre: {
-    name: 'Laguerre RSI', short: 'Laguerre RSI', description: 'Ehlers’ low-lag RSI from a Laguerre filter, 0–1', category: 'Oscillators', overlay: false, precision: 3,
-    params: [P('gamma', 'Gamma', 0.5, 0.01, 0.99, 0.01), SRC()],
+    name: t('ind.laguerre.name'), short: 'Laguerre RSI', description: t('ind.laguerre.desc'), category: 'Oscillators', overlay: false, precision: 3,
+    params: [P('gamma', t('ind.p.gamma'), 0.5, 0.01, 0.99, 0.01), SRC()],
     levels: [0.8, 0.2],
     fills: [levelsFill(0.8, 0.2, 'rgba(126, 87, 194, 0.08)')],
     plots: [{ key: 'lrsi', title: 'LRSI', color: '#7E57C2' }],
     calc: (bars, p) => ({ lrsi: laguerreRsi(source(bars, p.source), p.gamma) }),
   },
   gator: {
-    name: 'Gator Oscillator', short: 'Gator', description: 'How far apart the Alligator lines are', category: 'Oscillators', overlay: false,
+    name: t('ind.gator.name'), short: 'Gator', description: t('ind.gator.desc'), category: 'Oscillators', overlay: false,
     params: [
-      P('jaw', 'Jaw length', 13), P('jawOffset', 'Jaw offset', 8, 0, 100), P('teeth', 'Teeth length', 8),
-      P('teethOffset', 'Teeth offset', 5, 0, 100), P('lips', 'Lips length', 5), P('lipsOffset', 'Lips offset', 3, 0, 100),
+      P('jaw', t('ind.p.jawLength'), 13), P('jawOffset', t('ind.p.jawOffset'), 8, 0, 100), P('teeth', t('ind.p.teethLength'), 8),
+      P('teethOffset', t('ind.p.teethOffset'), 5, 0, 100), P('lips', t('ind.p.lipsLength'), 5), P('lipsOffset', t('ind.p.lipsOffset'), 3, 0, 100),
     ],
     plots: [
-      { key: 'upper', title: 'Upper', type: 'histogram', colorFn: (i, out) => (!(out.upper[i] < out.upper[i - 1]) ? '#26A69A' : '#EF5350') },
-      { key: 'lower', title: 'Lower', type: 'histogram', colorFn: (i, out) => (!(out.lower[i] > out.lower[i - 1]) ? '#26A69A' : '#EF5350') },
+      { key: 'upper', title: t('ind.plot.upper'), type: 'histogram', colorFn: (i, out) => (!(out.upper[i] < out.upper[i - 1]) ? '#26A69A' : '#EF5350') },
+      { key: 'lower', title: t('ind.plot.lower'), type: 'histogram', colorFn: (i, out) => (!(out.lower[i] > out.lower[i - 1]) ? '#26A69A' : '#EF5350') },
     ],
     calc: (bars, p) => {
       const { jaw, teeth, lips } = alligator(bars, p.jaw, p.jawOffset, p.teeth, p.teethOffset, p.lips, p.lipsOffset);
@@ -1367,16 +1389,16 @@ export const INDICATORS = {
     },
   },
   imi: {
-    name: 'Intraday Momentum Index', short: 'IMI', description: 'RSI of open-to-close moves, 0–100', category: 'Oscillators', overlay: false, precision: 2,
-    params: [P('length', 'Length', 14)],
+    name: t('ind.imi.name'), short: 'IMI', description: t('ind.imi.desc'), category: 'Oscillators', overlay: false, precision: 2,
+    params: [P('length', t('ind.p.length'), 14)],
     levels: [70, 30],
     fills: [levelsFill(70, 30, 'rgba(126, 87, 194, 0.08)')],
     plots: [{ key: 'imi', title: 'IMI', color: '#7E57C2' }],
     calc: (bars, p) => ({ imi: imi(bars, p.length) }),
   },
   zscore: {
-    name: 'Z-Score', short: 'Z-Score', description: 'Distance from the average in standard deviations', category: 'Oscillators', overlay: false, precision: 2,
-    params: [P('length', 'Length', 20), SRC()],
+    name: t('ind.zscore.name'), short: 'Z-Score', description: t('ind.zscore.desc'), category: 'Oscillators', overlay: false, precision: 2,
+    params: [P('length', t('ind.p.length'), 20), SRC()],
     levels: [2, 0, -2],
     fills: [levelsFill(2, -2, 'rgba(33, 150, 243, 0.07)')],
     plots: [{ key: 'z', title: 'Z', color: '#4FA3F7' }],
@@ -1385,84 +1407,84 @@ export const INDICATORS = {
 
   // --- Momentum ---------------------------------------------------------------------
   macd: {
-    name: 'MACD', short: 'MACD', description: 'Moving average convergence/divergence', category: 'Momentum', overlay: false,
-    params: [P('fast', 'Fast length', 12), P('slow', 'Slow length', 26), P('signal', 'Signal length', 9), SRC()],
+    name: t('ind.macd.name'), short: 'MACD', description: t('ind.macd.desc'), category: 'Momentum', overlay: false,
+    params: [P('fast', t('ind.p.fastLength'), 12), P('slow', t('ind.p.slowLength'), 26), P('signal', t('ind.p.signalLength'), 9), SRC()],
     plots: [
-      { key: 'hist', title: 'Histogram', type: 'histogram', colorFn: (i, out) => macdHistColor(out.hist, i) },
+      { key: 'hist', title: t('ind.plot.histogram'), type: 'histogram', colorFn: (i, out) => macdHistColor(out.hist, i) },
       { key: 'macd', title: 'MACD', color: '#4FA3F7' },
-      { key: 'signal', title: 'Signal', color: '#FF6D00' },
+      { key: 'signal', title: t('ind.plot.signal'), color: '#FF6D00' },
     ],
     calc: (bars, p) => macd(source(bars, p.source), p.fast, p.slow, p.signal),
   },
   ao: {
-    name: 'Awesome Oscillator', short: 'AO', description: '5 vs 34 bar SMA of the bar midpoint', category: 'Momentum', overlay: false,
+    name: t('ind.ao.name'), short: 'AO', description: t('ind.ao.desc'), category: 'Momentum', overlay: false,
     params: [],
     plots: [{ key: 'ao', title: 'AO', type: 'histogram', colorFn: (i, out) => (out.ao[i] >= (out.ao[i - 1] ?? -Infinity) ? '#34B886' : '#EC5246') }],
     calc: (bars) => { const h = source(bars, 'hl2'), a = sma(h, 5), b = sma(h, 34); return { ao: a.map((v, i) => v - b[i]) }; },
   },
   mom: {
-    name: 'Momentum', short: 'Mom', description: 'Close minus the close N bars ago', category: 'Momentum', overlay: false,
-    params: [P('length', 'Length', 10), SRC()],
+    name: t('ind.mom.name'), short: 'Mom', description: t('ind.mom.desc'), category: 'Momentum', overlay: false,
+    params: [P('length', t('ind.p.length'), 10), SRC()],
     levels: [0],
     plots: [{ key: 'mom', title: 'Mom', color: '#4FA3F7' }],
     calc: (bars, p) => ({ mom: change(source(bars, p.source), p.length) }),
   },
   roc: {
-    name: 'Rate Of Change', short: 'ROC', description: 'Percent change over N bars', category: 'Momentum', overlay: false, precision: 2,
-    params: [P('length', 'Length', 9), SRC()],
+    name: t('ind.roc.name'), short: 'ROC', description: t('ind.roc.desc'), category: 'Momentum', overlay: false, precision: 2,
+    params: [P('length', t('ind.p.length'), 9), SRC()],
     levels: [0],
     plots: [{ key: 'roc', title: 'ROC', color: '#4FA3F7' }],
     calc: (bars, p) => ({ roc: roc(source(bars, p.source), p.length) }),
   },
   bop: {
-    name: 'Balance of Power', short: 'BoP', description: 'Buyers vs sellers within each bar', category: 'Momentum', overlay: false, precision: 2,
+    name: t('ind.bop.name'), short: 'BoP', description: t('ind.bop.desc'), category: 'Momentum', overlay: false, precision: 2,
     params: [],
     levels: [0],
     plots: [{ key: 'bop', title: 'BoP', color: '#EC5246' }],
     calc: (bars) => ({ bop: bars.map((b) => (b.high === b.low ? 0 : (b.close - b.open) / (b.high - b.low))) }),
   },
   efi: {
-    name: 'Elder Force Index', short: 'EFI', description: 'Price change × volume, smoothed', category: 'Momentum', overlay: false, format: 'volume',
-    params: [P('length', 'Length', 13)],
+    name: t('ind.efi.name'), short: 'EFI', description: t('ind.efi.desc'), category: 'Momentum', overlay: false, format: 'volume',
+    params: [P('length', t('ind.p.length'), 13)],
     levels: [0],
     plots: [{ key: 'efi', title: 'EFI', color: '#EC5246' }],
     calc: (bars, p) => ({ efi: ema(change(source(bars)).map((v, i) => v * bars[i].volume), p.length) }),
   },
   ppo: {
-    name: 'Percentage Price Oscillator', short: 'PPO', description: 'MACD as a percent of the slow EMA', category: 'Momentum', overlay: false, precision: 2,
-    params: [P('fast', 'Fast length', 12), P('slow', 'Slow length', 26), P('signal', 'Signal length', 9), SRC()],
+    name: t('ind.ppo.name'), short: 'PPO', description: t('ind.ppo.desc'), category: 'Momentum', overlay: false, precision: 2,
+    params: [P('fast', t('ind.p.fastLength'), 12), P('slow', t('ind.p.slowLength'), 26), P('signal', t('ind.p.signalLength'), 9), SRC()],
     plots: [
-      { key: 'hist', title: 'Histogram', type: 'histogram', colorFn: (i, out) => macdHistColor(out.hist, i) },
+      { key: 'hist', title: t('ind.plot.histogram'), type: 'histogram', colorFn: (i, out) => macdHistColor(out.hist, i) },
       { key: 'ppo', title: 'PPO', color: '#4FA3F7' },
-      { key: 'signal', title: 'Signal', color: '#FF6D00' },
+      { key: 'signal', title: t('ind.plot.signal'), color: '#FF6D00' },
     ],
     calc: (bars, p) => ppo(source(bars, p.source), p.fast, p.slow, p.signal),
   },
   kst: {
-    name: 'Know Sure Thing', short: 'KST', description: 'Weighted sum of four smoothed rates of change (Pring)', category: 'Momentum', overlay: false, precision: 2,
+    name: t('ind.kst.name'), short: 'KST', description: t('ind.kst.desc'), category: 'Momentum', overlay: false, precision: 2,
     params: [
       P('roc1', 'ROC #1', 10), P('roc2', 'ROC #2', 15), P('roc3', 'ROC #3', 20), P('roc4', 'ROC #4', 30),
-      P('sma1', 'SMA #1', 10), P('sma2', 'SMA #2', 10), P('sma3', 'SMA #3', 10), P('sma4', 'SMA #4', 15), P('signal', 'Signal length', 9),
+      P('sma1', 'SMA #1', 10), P('sma2', 'SMA #2', 10), P('sma3', 'SMA #3', 10), P('sma4', 'SMA #4', 15), P('signal', t('ind.p.signalLength'), 9),
     ],
     levels: [0],
-    plots: [{ key: 'kst', title: 'KST', color: '#009688' }, { key: 'signal', title: 'Signal', color: '#F44336' }],
+    plots: [{ key: 'kst', title: 'KST', color: '#009688' }, { key: 'signal', title: t('ind.plot.signal'), color: '#F44336' }],
     calc: (bars, p) => kst(source(bars), p.roc1, p.roc2, p.roc3, p.roc4, p.sma1, p.sma2, p.sma3, p.sma4, p.signal),
   },
   elderray: {
-    name: 'Elder Ray Index', short: 'Elder Ray', description: 'Bull power (high − EMA) and bear power (low − EMA)', category: 'Momentum', overlay: false,
-    params: [P('length', 'EMA length', 13)],
-    plots: [{ key: 'bull', title: 'Bull power', type: 'histogram', color: '#26A69A' }, { key: 'bear', title: 'Bear power', type: 'histogram', color: '#EF5350' }],
+    name: t('ind.elderray.name'), short: 'Elder Ray', description: t('ind.elderray.desc'), category: 'Momentum', overlay: false,
+    params: [P('length', t('ind.p.lengthOf', { name: 'EMA' }), 13)],
+    plots: [{ key: 'bull', title: t('ind.plot.bullPower'), type: 'histogram', color: '#26A69A' }, { key: 'bear', title: t('ind.plot.bearPower'), type: 'histogram', color: '#EF5350' }],
     calc: (bars, p) => elderRay(bars, p.length),
   },
   qstick: {
-    name: 'Qstick', short: 'Qstick', description: 'Average candle body (close − open)', category: 'Momentum', overlay: false,
-    params: [P('length', 'Length', 8)],
+    name: t('ind.qstick.name'), short: 'Qstick', description: t('ind.qstick.desc'), category: 'Momentum', overlay: false,
+    params: [P('length', t('ind.p.length'), 8)],
     levels: [0],
     plots: [{ key: 'q', title: 'Qstick', color: '#4FA3F7' }],
     calc: (bars, p) => ({ q: qstick(bars, p.length) }),
   },
   ac: {
-    name: 'Accelerator Oscillator', short: 'AC', description: 'Awesome Oscillator minus its 5-bar SMA', category: 'Momentum', overlay: false,
+    name: t('ind.ac.name'), short: 'AC', description: t('ind.ac.desc'), category: 'Momentum', overlay: false,
     params: [],
     plots: [{ key: 'ac', title: 'AC', type: 'histogram', colorFn: (i, out) => (!(out.ac[i] < out.ac[i - 1]) ? '#34B886' : '#EC5246') }],
     calc: (bars) => {
@@ -1471,10 +1493,13 @@ export const INDICATORS = {
     },
   },
   squeeze: {
-    name: 'Squeeze Momentum', short: 'Squeeze', description: 'Bollinger Bands inside Keltner Channels, with a momentum histogram', category: 'Momentum', overlay: false,
-    params: [P('length', 'BB length', 20), P('mult', 'BB StdDev', 2, 0.1, 10, 0.1), P('kcLength', 'KC length', 20, 2), P('kcMult', 'KC multiplier', 1.5, 0.1, 10, 0.1)],
+    name: t('ind.squeeze.name'), short: 'Squeeze', description: t('ind.squeeze.desc'), category: 'Momentum', overlay: false,
+    params: [
+      P('length', t('ind.p.lengthOf', { name: 'BB' }), 20), P('mult', t('ind.p.bbStdDev'), 2, 0.1, 10, 0.1),
+      P('kcLength', t('ind.p.lengthOf', { name: 'KC' }), 20, 2), P('kcMult', t('ind.p.multOf', { name: 'KC' }), 1.5, 0.1, 10, 0.1),
+    ],
     plots: [
-      { key: 'value', title: 'Momentum', type: 'histogram', colorFn: (i, out) => macdHistColor(out.value, i) },
+      { key: 'value', title: t('ind.plot.momentum'), type: 'histogram', colorFn: (i, out) => macdHistColor(out.value, i) },
       // dots on the zero line: red = squeeze on, green = released, blue = neither
       { key: 'sqz', title: 'Squeeze', type: 'dots', colorFn: (i, out) => (out.state[i] === 1 ? '#F23645' : out.state[i] === -1 ? '#089981' : '#4FA3F7') },
     ],
@@ -1486,8 +1511,8 @@ export const INDICATORS = {
 
   // --- Trend strength ---------------------------------------------------------------
   adx: {
-    name: 'Directional Movement Index', short: 'DMI', description: 'ADX trend strength with +DI and −DI', category: 'Trend strength', overlay: false, precision: 2,
-    params: [P('diLength', 'DI length', 14), P('adxLength', 'ADX smoothing', 14)],
+    name: t('ind.adx.name'), short: 'DMI', description: t('ind.adx.desc'), category: 'Trend strength', overlay: false, precision: 2,
+    params: [P('diLength', t('ind.p.lengthOf', { name: 'DI' }), 14), P('adxLength', t('ind.p.smoothingOf', { name: 'ADX' }), 14)],
     plots: [
       { key: 'adx', title: 'ADX', color: '#F50057' },
       { key: 'plus', title: '+DI', color: '#4FA3F7' },
@@ -1496,9 +1521,9 @@ export const INDICATORS = {
     calc: (bars, p) => dmi(bars, p.diLength, p.adxLength),
   },
   aroon: {
-    name: 'Aroon', short: 'Aroon', description: 'Bars since the recent high and low', category: 'Trend strength', overlay: false, precision: 2,
-    params: [P('length', 'Length', 14)],
-    plots: [{ key: 'up', title: 'Up', color: '#FB8C00' }, { key: 'down', title: 'Down', color: '#4FA3F7' }],
+    name: t('ind.aroon.name'), short: 'Aroon', description: t('ind.aroon.desc'), category: 'Trend strength', overlay: false, precision: 2,
+    params: [P('length', t('ind.p.length'), 14)],
+    plots: [{ key: 'up', title: t('ind.plot.up'), color: '#FB8C00' }, { key: 'down', title: t('ind.plot.down'), color: '#4FA3F7' }],
     calc: (bars, p) => {
       const hs = barsSinceExtreme(pick(bars, 'high'), p.length, (a, b) => a > b);
       const ls = barsSinceExtreme(pick(bars, 'low'), p.length, (a, b) => a < b);
@@ -1506,8 +1531,8 @@ export const INDICATORS = {
     },
   },
   vortex: {
-    name: 'Vortex Indicator', short: 'VI', description: 'Upward vs downward trend movement', category: 'Trend strength', overlay: false, precision: 3,
-    params: [P('length', 'Length', 14)],
+    name: t('ind.vortex.name'), short: 'VI', description: t('ind.vortex.desc'), category: 'Trend strength', overlay: false, precision: 3,
+    params: [P('length', t('ind.p.length'), 14)],
     plots: [{ key: 'plus', title: 'VI+', color: '#4FA3F7' }, { key: 'minus', title: 'VI−', color: '#E91E63' }],
     calc: (bars, p) => {
       const vp = bars.map((b, i) => (i ? Math.abs(b.high - bars[i - 1].low) : NaN));
@@ -1517,8 +1542,8 @@ export const INDICATORS = {
     },
   },
   chop: {
-    name: 'Choppiness Index', short: 'CHOP', description: 'Trending (low) vs sideways (high) market', category: 'Trend strength', overlay: false, precision: 2,
-    params: [P('length', 'Length', 14)],
+    name: t('ind.chop.name'), short: 'CHOP', description: t('ind.chop.desc'), category: 'Trend strength', overlay: false, precision: 2,
+    params: [P('length', t('ind.p.length'), 14)],
     levels: [61.8, 38.2],
     fills: [levelsFill(61.8, 38.2, 'rgba(33, 150, 243, 0.07)')],
     plots: [{ key: 'chop', title: 'CHOP', color: '#4FA3F7' }],
@@ -1529,34 +1554,34 @@ export const INDICATORS = {
     },
   },
   lrslope: {
-    name: 'Linear Regression Slope', short: 'LR Slope', description: 'Slope of the least-squares line, per bar', category: 'Trend strength', overlay: false,
-    params: [P('length', 'Length', 20, 2), SRC()],
+    name: t('ind.lrslope.name'), short: 'LR Slope', description: t('ind.lrslope.desc'), category: 'Trend strength', overlay: false,
+    params: [P('length', t('ind.p.length'), 20, 2), SRC()],
     levels: [0],
-    plots: [{ key: 'slope', title: 'Slope', color: '#4FA3F7' }],
+    plots: [{ key: 'slope', title: t('ind.plot.slope'), color: '#4FA3F7' }],
     calc: (bars, p) => ({ slope: linregSlope(source(bars, p.source), p.length) }),
   },
   rwi: {
-    name: 'Random Walk Index', short: 'RWI', description: 'Moves vs what a random walk would cover', category: 'Trend strength', overlay: false, precision: 2,
-    params: [P('length', 'Length', 14)],
+    name: t('ind.rwi.name'), short: 'RWI', description: t('ind.rwi.desc'), category: 'Trend strength', overlay: false, precision: 2,
+    params: [P('length', t('ind.p.length'), 14)],
     levels: [1],
-    plots: [{ key: 'high', title: 'RWI high', color: '#26A69A' }, { key: 'low', title: 'RWI low', color: '#EF5350' }],
+    plots: [{ key: 'high', title: t('ind.plot.rwiHigh'), color: '#26A69A' }, { key: 'low', title: t('ind.plot.rwiLow'), color: '#EF5350' }],
     calc: (bars, p) => rwi(bars, p.length),
   },
   vhf: {
-    name: 'Vertical Horizontal Filter', short: 'VHF', description: 'Trending (high) vs congested (low) market', category: 'Trend strength', overlay: false, precision: 3,
-    params: [P('length', 'Length', 28), SRC()],
+    name: t('ind.vhf.name'), short: 'VHF', description: t('ind.vhf.desc'), category: 'Trend strength', overlay: false, precision: 3,
+    params: [P('length', t('ind.p.length'), 28), SRC()],
     plots: [{ key: 'vhf', title: 'VHF', color: '#4FA3F7' }],
     calc: (bars, p) => ({ vhf: vhf(source(bars, p.source), p.length) }),
   },
   er: {
-    name: 'Efficiency Ratio', short: 'ER', description: 'Net move over total movement, 0–1 (Kaufman)', category: 'Trend strength', overlay: false, precision: 3,
-    params: [P('length', 'Length', 10), SRC()],
+    name: t('ind.er.name'), short: 'ER', description: t('ind.er.desc'), category: 'Trend strength', overlay: false, precision: 3,
+    params: [P('length', t('ind.p.length'), 10), SRC()],
     plots: [{ key: 'er', title: 'ER', color: '#FF9800' }],
     calc: (bars, p) => ({ er: er(source(bars, p.source), p.length) }),
   },
   pfe: {
-    name: 'Polarized Fractal Efficiency', short: 'PFE', description: 'How straight the recent path is, −100 to 100', category: 'Trend strength', overlay: false, precision: 2,
-    params: [P('length', 'Length', 10), P('smooth', 'Smoothing', 5), SRC()],
+    name: t('ind.pfe.name'), short: 'PFE', description: t('ind.pfe.desc'), category: 'Trend strength', overlay: false, precision: 2,
+    params: [P('length', t('ind.p.length'), 10), P('smooth', t('ind.p.smoothing'), 5), SRC()],
     levels: [0],
     plots: [{ key: 'pfe', title: 'PFE', color: '#4FA3F7' }],
     calc: (bars, p) => ({ pfe: pfe(source(bars, p.source), p.length, p.smooth) }),
@@ -1564,29 +1589,29 @@ export const INDICATORS = {
 
   // --- Volume ------------------------------------------------------------------------
   volume: {
-    name: 'Volume', short: 'Vol', description: 'Traded volume per bar', category: 'Volume', overlay: true, scale: 'volume', format: 'volume',
+    name: t('ind.volume.name'), short: 'Vol', description: t('ind.volume.desc'), category: 'Volume', overlay: true, scale: 'volume', format: 'volume',
     params: [],
     plots: [{
-      key: 'vol', title: 'Volume', type: 'histogram',
+      key: 'vol', title: t('common.volume'), type: 'histogram',
       colorFn: (i, out, bars) => alpha(bars[i].close >= bars[i].open ? UP : DOWN, 0.45),
     }],
     calc: (bars) => ({ vol: bars.map((b) => b.volume) }),
   },
   obv: {
-    name: 'On Balance Volume', short: 'OBV', description: 'Running total of signed volume', category: 'Volume', overlay: false, format: 'volume',
+    name: t('ind.obv.name'), short: 'OBV', description: t('ind.obv.desc'), category: 'Volume', overlay: false, format: 'volume',
     params: [],
     plots: [{ key: 'obv', title: 'OBV', color: '#4FA3F7' }],
     calc: (bars) => ({ obv: obv(bars) }),
   },
   ad: {
-    name: 'Accumulation/Distribution', short: 'A/D', description: 'Volume weighted by where the close sits in the bar', category: 'Volume', overlay: false, format: 'volume',
+    name: t('ind.ad.name'), short: 'A/D', description: t('ind.ad.desc'), category: 'Volume', overlay: false, format: 'volume',
     params: [],
     plots: [{ key: 'ad', title: 'A/D', color: '#999915' }],
     calc: (bars) => ({ ad: cum(bars.map((b) => (b.high === b.low ? 0 : (((b.close - b.low) - (b.high - b.close)) / (b.high - b.low)) * b.volume))) }),
   },
   cmf: {
-    name: 'Chaikin Money Flow', short: 'CMF', description: 'Accumulation vs distribution over N bars', category: 'Volume', overlay: false, precision: 3,
-    params: [P('length', 'Length', 20)],
+    name: t('ind.cmf.name'), short: 'CMF', description: t('ind.cmf.desc'), category: 'Volume', overlay: false, precision: 3,
+    params: [P('length', t('ind.p.length'), 20)],
     levels: [0],
     plots: [{ key: 'cmf', title: 'CMF', color: '#43A047' }],
     calc: (bars, p) => {
@@ -1596,8 +1621,8 @@ export const INDICATORS = {
     },
   },
   chaikinosc: {
-    name: 'Chaikin Oscillator', short: 'Chaikin Osc', description: 'Momentum of Accumulation/Distribution', category: 'Volume', overlay: false, format: 'volume',
-    params: [P('fast', 'Fast', 3), P('slow', 'Slow', 10)],
+    name: t('ind.chaikinosc.name'), short: 'Chaikin Osc', description: t('ind.chaikinosc.desc'), category: 'Volume', overlay: false, format: 'volume',
+    params: [P('fast', t('ind.p.fast'), 3), P('slow', t('ind.p.slow'), 10)],
     levels: [0],
     plots: [{ key: 'osc', title: 'Chaikin Osc', color: '#EC407A' }],
     calc: (bars, p) => {
@@ -1607,14 +1632,14 @@ export const INDICATORS = {
     },
   },
   pvt: {
-    name: 'Price Volume Trend', short: 'PVT', description: 'Volume scaled by percent price change, cumulative', category: 'Volume', overlay: false, format: 'volume',
+    name: t('ind.pvt.name'), short: 'PVT', description: t('ind.pvt.desc'), category: 'Volume', overlay: false, format: 'volume',
     params: [],
     plots: [{ key: 'pvt', title: 'PVT', color: '#4FA3F7' }],
     calc: (bars) => ({ pvt: cum(bars.map((b, i) => (i ? ((b.close - bars[i - 1].close) / bars[i - 1].close) * b.volume : 0))) }),
   },
   volosc: {
-    name: 'Volume Oscillator', short: 'Vol Osc', description: 'Fast vs slow volume EMA, in percent', category: 'Volume', overlay: false, precision: 2,
-    params: [P('fast', 'Short length', 5), P('slow', 'Long length', 10)],
+    name: t('ind.volosc.name'), short: 'Vol Osc', description: t('ind.volosc.desc'), category: 'Volume', overlay: false, precision: 2,
+    params: [P('fast', t('ind.p.shortLength'), 5), P('slow', t('ind.p.longLength'), 10)],
     levels: [0],
     plots: [{ key: 'osc', title: 'Vol Osc', color: '#4FA3F7' }],
     calc: (bars, p) => {
@@ -1623,62 +1648,62 @@ export const INDICATORS = {
     },
   },
   klinger: {
-    name: 'Klinger Oscillator', short: 'KVO', description: 'Volume force: fast minus slow EMA, with a signal', category: 'Volume', overlay: false, format: 'volume',
-    params: [P('fast', 'Fast length', 34), P('slow', 'Slow length', 55), P('signal', 'Signal length', 13)],
+    name: t('ind.klinger.name'), short: 'KVO', description: t('ind.klinger.desc'), category: 'Volume', overlay: false, format: 'volume',
+    params: [P('fast', t('ind.p.fastLength'), 34), P('slow', t('ind.p.slowLength'), 55), P('signal', t('ind.p.signalLength'), 13)],
     levels: [0],
-    plots: [{ key: 'kvo', title: 'KVO', color: '#4FA3F7' }, { key: 'signal', title: 'Signal', color: '#43A047' }],
+    plots: [{ key: 'kvo', title: 'KVO', color: '#4FA3F7' }, { key: 'signal', title: t('ind.plot.signal'), color: '#43A047' }],
     calc: (bars, p) => klinger(bars, p.fast, p.slow, p.signal),
   },
   eom: {
-    name: 'Ease of Movement', short: 'EOM', description: 'Price move relative to volume (Arms)', category: 'Volume', overlay: false,
-    params: [P('length', 'Length', 14), P('divisor', 'Divisor', 10000, 1, 1e12, 1)],
+    name: t('ind.eom.name'), short: 'EOM', description: t('ind.eom.desc'), category: 'Volume', overlay: false,
+    params: [P('length', t('ind.p.length'), 14), P('divisor', t('ind.p.divisor'), 10000, 1, 1e12, 1)],
     levels: [0],
     plots: [{ key: 'eom', title: 'EOM', color: '#43A047' }],
     calc: (bars, p) => ({ eom: eom(bars, p.length, p.divisor) }),
   },
   nvi: {
-    name: 'Negative Volume Index', short: 'NVI', description: 'Cumulative change on bars with falling volume', category: 'Volume', overlay: false, precision: 2,
-    params: [P('signal', 'EMA length', 255)],
+    name: t('ind.nvi.name'), short: 'NVI', description: t('ind.nvi.desc'), category: 'Volume', overlay: false, precision: 2,
+    params: [P('signal', t('ind.p.lengthOf', { name: 'EMA' }), 255)],
     plots: [{ key: 'nvi', title: 'NVI', color: '#4FA3F7' }, { key: 'signal', title: 'EMA', color: '#FF6D00', width: 1 }],
     calc: (bars, p) => { const v = nvi(bars); return { nvi: v, signal: ema(v, p.signal) }; },
   },
   pvi: {
-    name: 'Positive Volume Index', short: 'PVI', description: 'Cumulative change on bars with rising volume', category: 'Volume', overlay: false, precision: 2,
-    params: [P('signal', 'EMA length', 255)],
+    name: t('ind.pvi.name'), short: 'PVI', description: t('ind.pvi.desc'), category: 'Volume', overlay: false, precision: 2,
+    params: [P('signal', t('ind.p.lengthOf', { name: 'EMA' }), 255)],
     plots: [{ key: 'pvi', title: 'PVI', color: '#4FA3F7' }, { key: 'signal', title: 'EMA', color: '#FF6D00', width: 1 }],
     calc: (bars, p) => { const v = pvi(bars); return { pvi: v, signal: ema(v, p.signal) }; },
   },
   pvo: {
-    name: 'Percentage Volume Oscillator', short: 'PVO', description: 'PPO applied to volume', category: 'Volume', overlay: false, precision: 2,
-    params: [P('fast', 'Fast length', 12), P('slow', 'Slow length', 26), P('signal', 'Signal length', 9)],
+    name: t('ind.pvo.name'), short: 'PVO', description: t('ind.pvo.desc'), category: 'Volume', overlay: false, precision: 2,
+    params: [P('fast', t('ind.p.fastLength'), 12), P('slow', t('ind.p.slowLength'), 26), P('signal', t('ind.p.signalLength'), 9)],
     plots: [
-      { key: 'hist', title: 'Histogram', type: 'histogram', colorFn: (i, out) => macdHistColor(out.hist, i) },
+      { key: 'hist', title: t('ind.plot.histogram'), type: 'histogram', colorFn: (i, out) => macdHistColor(out.hist, i) },
       { key: 'ppo', title: 'PVO', color: '#4FA3F7' },
-      { key: 'signal', title: 'Signal', color: '#FF6D00' },
+      { key: 'signal', title: t('ind.plot.signal'), color: '#FF6D00' },
     ],
     calc: (bars, p) => ppo(pick(bars, 'volume'), p.fast, p.slow, p.signal),
   },
   vwmacd: {
-    name: 'Volume-Weighted MACD', short: 'VW-MACD', description: 'MACD built from volume-weighted averages', category: 'Volume', overlay: false,
-    params: [P('fast', 'Fast length', 12), P('slow', 'Slow length', 26), P('signal', 'Signal length', 9)],
+    name: t('ind.vwmacd.name'), short: 'VW-MACD', description: t('ind.vwmacd.desc'), category: 'Volume', overlay: false,
+    params: [P('fast', t('ind.p.fastLength'), 12), P('slow', t('ind.p.slowLength'), 26), P('signal', t('ind.p.signalLength'), 9)],
     plots: [
-      { key: 'hist', title: 'Histogram', type: 'histogram', colorFn: (i, out) => macdHistColor(out.hist, i) },
+      { key: 'hist', title: t('ind.plot.histogram'), type: 'histogram', colorFn: (i, out) => macdHistColor(out.hist, i) },
       { key: 'macd', title: 'VW-MACD', color: '#4FA3F7' },
-      { key: 'signal', title: 'Signal', color: '#FF6D00' },
+      { key: 'signal', title: t('ind.plot.signal'), color: '#FF6D00' },
     ],
     calc: (bars, p) => vwmacd(bars, p.fast, p.slow, p.signal),
   },
 
   // --- Volatility ----------------------------------------------------------------------
   atr: {
-    name: 'Average True Range', short: 'ATR', description: 'Average bar range including gaps', category: 'Volatility', overlay: false,
-    params: [P('length', 'Length', 14)],
+    name: t('ind.atr.name'), short: 'ATR', description: t('ind.atr.desc'), category: 'Volatility', overlay: false,
+    params: [P('length', t('ind.p.length'), 14)],
     plots: [{ key: 'atr', title: 'ATR', color: '#EC5246' }],
     calc: (bars, p) => ({ atr: atr(bars, p.length) }),
   },
   hv: {
-    name: 'Historical Volatility', short: 'HV', description: 'Annualized standard deviation of returns, in percent', category: 'Volatility', overlay: false, precision: 2,
-    params: [P('length', 'Length', 10)],
+    name: t('ind.hv.name'), short: 'HV', description: t('ind.hv.desc'), category: 'Volatility', overlay: false, precision: 2,
+    params: [P('length', t('ind.p.length'), 10)],
     plots: [{ key: 'hv', title: 'HV', color: '#4FA3F7' }],
     calc: (bars, p, ctx = {}) => {
       const r = bars.map((b, i) => (i ? Math.log(b.close / bars[i - 1].close) : NaN));
@@ -1687,8 +1712,8 @@ export const INDICATORS = {
     },
   },
   bbw: {
-    name: 'Bollinger BandWidth', short: 'BBW', description: 'Width of the bands relative to the basis', category: 'Volatility', overlay: false, precision: 4,
-    params: [P('length', 'Length', 20), P('mult', 'StdDev', 2, 0.1, 10, 0.1)],
+    name: t('ind.bbw.name'), short: 'BBW', description: t('ind.bbw.desc'), category: 'Volatility', overlay: false, precision: 4,
+    params: [P('length', t('ind.p.length'), 20), P('mult', t('ind.p.stdDev'), 2, 0.1, 10, 0.1)],
     plots: [{ key: 'w', title: 'BBW', color: '#4FA3F7' }],
     calc: (bars, p) => {
       const { upper, lower, basis } = bb(source(bars), p.length, p.mult);
@@ -1696,40 +1721,40 @@ export const INDICATORS = {
     },
   },
   stdevind: {
-    name: 'Standard Deviation', short: 'StdDev', description: 'Standard deviation of the close', category: 'Volatility', overlay: false,
-    params: [P('length', 'Length', 20), SRC()],
+    name: t('ind.stdevind.name'), short: 'StdDev', description: t('ind.stdevind.desc'), category: 'Volatility', overlay: false,
+    params: [P('length', t('ind.p.length'), 20), SRC()],
     plots: [{ key: 'sd', title: 'StdDev', color: '#4FA3F7' }],
     calc: (bars, p) => ({ sd: stdev(source(bars, p.source), p.length) }),
   },
   atrp: {
-    name: 'ATR Percent', short: 'ATR %', description: 'Average true range as a percent of the close', category: 'Volatility', overlay: false, precision: 2,
-    params: [P('length', 'Length', 14)],
+    name: t('ind.atrp.name'), short: 'ATR %', description: t('ind.atrp.desc'), category: 'Volatility', overlay: false, precision: 2,
+    params: [P('length', t('ind.p.length'), 14)],
     plots: [{ key: 'atrp', title: 'ATR %', color: '#EC5246' }],
     calc: (bars, p) => ({ atrp: atrp(bars, p.length) }),
   },
   chaikinvol: {
-    name: 'Chaikin Volatility', short: 'Chaikin Vol', description: 'Rate of change of the average bar range', category: 'Volatility', overlay: false, precision: 2,
-    params: [P('length', 'EMA length', 10), P('roc', 'ROC length', 10)],
+    name: t('ind.chaikinvol.name'), short: 'Chaikin Vol', description: t('ind.chaikinvol.desc'), category: 'Volatility', overlay: false, precision: 2,
+    params: [P('length', t('ind.p.lengthOf', { name: 'EMA' }), 10), P('roc', t('ind.p.lengthOf', { name: 'ROC' }), 10)],
     levels: [0],
     plots: [{ key: 'cv', title: 'CV', color: '#4FA3F7' }],
     calc: (bars, p) => ({ cv: chaikinVolatility(bars, p.length, p.roc) }),
   },
   ulcer: {
-    name: 'Ulcer Index', short: 'Ulcer', description: 'Depth and duration of drawdowns from the recent high', category: 'Volatility', overlay: false, precision: 2,
-    params: [P('length', 'Length', 14), SRC()],
+    name: t('ind.ulcer.name'), short: 'Ulcer', description: t('ind.ulcer.desc'), category: 'Volatility', overlay: false, precision: 2,
+    params: [P('length', t('ind.p.length'), 14), SRC()],
     plots: [{ key: 'ui', title: 'UI', color: '#EC5246' }],
     calc: (bars, p) => ({ ui: ulcer(source(bars, p.source), p.length) }),
   },
   massindex: {
-    name: 'Mass Index', short: 'Mass', description: 'Range expansion that tends to precede reversals', category: 'Volatility', overlay: false, precision: 2,
-    params: [P('length', 'EMA length', 9), P('sum', 'Sum length', 25)],
+    name: t('ind.massindex.name'), short: 'Mass', description: t('ind.massindex.desc'), category: 'Volatility', overlay: false, precision: 2,
+    params: [P('length', t('ind.p.lengthOf', { name: 'EMA' }), 9), P('sum', t('ind.p.sumLength'), 25)],
     levels: [27, 26.5],
     plots: [{ key: 'mi', title: 'Mass', color: '#4FA3F7' }],
     calc: (bars, p) => ({ mi: massIndex(bars, p.length, p.sum) }),
   },
   rvi: {
-    name: 'Relative Volatility Index', short: 'RVI', description: 'RSI-style direction of volatility, 0–100 (Dorsey)', category: 'Volatility', overlay: false, precision: 2,
-    params: [P('length', 'StdDev length', 10), P('smooth', 'Smoothing', 14), SRC()],
+    name: t('ind.rvi.name'), short: 'RVI', description: t('ind.rvi.desc'), category: 'Volatility', overlay: false, precision: 2,
+    params: [P('length', t('ind.p.stdDevLength'), 10), P('smooth', t('ind.p.smoothing'), 14), SRC()],
     levels: [80, 20],
     fills: [levelsFill(80, 20, 'rgba(126, 87, 194, 0.08)')],
     plots: [{ key: 'rvi', title: 'RVI', color: '#7E57C2' }],

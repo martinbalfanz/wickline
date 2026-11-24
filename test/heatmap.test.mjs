@@ -1,6 +1,6 @@
 // Tests for the stock heatmap's layout and colours (public/js/heatmap.js).
 import assert from 'node:assert/strict';
-import { squarify, heatColor, groupBySector, layoutMap } from '../public/js/heatmap.js';
+import { squarify, heatColor, groupBySector, layoutMap, tileCode, tileName } from '../public/js/heatmap.js';
 
 let failed = 0;
 const test = (name, fn) => {
@@ -65,6 +65,40 @@ test('groupBySector and layoutMap: largest stocks, grouped, labelled', () => {
   const tech = labels.find((l) => l.name === 'Technology');
   const aapl = tiles.find((t) => t.r.s === 'AAPL');
   assert.ok(aapl.y >= tech.y + 16 - 1e-6);
+});
+
+test('tiles show the code local traders use', () => {
+  assert.equal(tileCode('601398.SS', 'CN'), '601398');
+  assert.equal(tileCode('300750.SZ', 'CN'), '300750');
+  assert.equal(tileCode('7203.T', 'JP'), '7203');
+  assert.equal(tileCode('0700.HK', 'HK'), '00700');
+  assert.equal(tileCode('005930.KS', 'KR'), '005930');
+  assert.equal(tileCode('6488.TWO', 'TW'), '6488');
+  assert.equal(tileCode('RELIANCE.NS', 'IN'), 'RELIANCE');
+  assert.equal(tileCode('INVE-B.ST', 'SE'), 'INVE B');
+  assert.equal(tileCode('BBD-B.TO', 'CA'), 'BBD.B');
+  assert.equal(tileCode('BT-A.L', 'GB'), 'BT.A');
+  assert.equal(tileCode('PETR4.SA', 'BR'), 'PETR4');
+  assert.equal(tileCode('BRK-B', 'us'), 'BRK-B');
+  assert.equal(tileCode('BTC', 'crypto'), 'BTC');
+});
+
+test('tile names drop legal forms', () => {
+  assert.equal(tileName('Toyota Motor Corporation'), 'Toyota Motor');
+  assert.equal(tileName('HSBC Holdings plc'), 'HSBC');
+  assert.equal(tileName('Kweichow Moutai Co., Ltd.'), 'Kweichow Moutai');
+  assert.equal(tileName('Samsung Biologics Co.,Ltd.'), 'Samsung Biologics');
+  assert.equal(tileName('Investor AB (publ)'), 'Investor');
+  assert.equal(tileName('Aena S.M.E., S.A.'), 'Aena');
+  assert.equal(tileName('Hermès International Société en commandite par actions'), 'Hermès International');
+  assert.equal(tileName('The Toronto-Dominion Bank'), 'Toronto-Dominion Bank');
+  assert.equal(tileName('Industrial and Commercial Bank of China Limited'), 'Industrial and Commercial Bank of China');
+  assert.equal(tileName('Sanofi'), 'Sanofi');
+  assert.equal(tileName('Mitsui & Co., Ltd.'), 'Mitsui');
+  assert.equal(tileName('Group'), 'Group');
+  assert.equal(tileName('Taiwan Semiconductor Manufactur', { cut: true }), 'Taiwan Semiconductor');
+  assert.equal(tileName('Space Exploration Technologies ', { cut: true }), 'Space Exploration Technologies');
+  assert.equal(tileName(undefined), '');
 });
 
 console.log(failed ? `\n${failed} failed` : '\nall passed');

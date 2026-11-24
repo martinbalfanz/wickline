@@ -4,31 +4,33 @@
 // /api/calendar (lib/news.mjs, lib/calendar.mjs, lib/markets.mjs).
 
 import { apiUrl, dataMode } from './env.js';
-import { $, esc, store } from './util.js';
+import { $, esc, store, fixed } from './util.js';
 import { fmtCap } from './screener.js';
+import { t, locale } from './i18n.js';
 
 const NEWS_EVERY = 30000;
 const CALENDAR_EVERY = 60000;
 
-export const TOPICS = [['all', 'All'], ['stocks', 'Stocks'], ['earnings', 'Earnings'], ['economy', 'Economy'], ['crypto', 'Crypto']];
+export const TOPICS = [['all', t('common.all')], ['stocks', t('news.topic.stocks')], ['earnings', t('news.topic.earnings')],
+  ['economy', t('news.topic.economy')], ['crypto', t('news.topic.crypto')]];
 const CAPS = [[1e9, '$1B+'], [2e9, '$2B+'], [1e10, '$10B+'], [1e11, '$100B+']];
-export const REGIONS = [['world', 'World'], ['us', 'United States'], ['gb', 'United Kingdom'], ['eu', 'Europe'], ['asia', 'Asia'],
-  ['in', 'India'], ['ca', 'Canada'], ['au', 'Australia']];
+export const REGIONS = [['world', t('news.region.world')], ['us', t('news.region.us')], ['gb', t('news.region.gb')], ['eu', t('news.region.eu')],
+  ['asia', t('news.region.asia')], ['in', t('news.region.in')], ['ca', t('news.region.ca')], ['au', t('news.region.au')]];
 
 // Calendar countries: these first in the picker; DEFAULT_COUNTRIES until the reader picks.
 const MAJOR = ['US', 'EU', 'GB', 'DE', 'FR', 'IT', 'ES', 'NL', 'CH', 'SE', 'JP', 'CN', 'HK', 'KR', 'TW', 'IN', 'CA', 'AU', 'NZ', 'BR', 'MX'];
 export const DEFAULT_COUNTRIES = ['US', 'EU', 'GB', 'DE', 'FR', 'IT', 'JP', 'CN', 'CA'];
-const regionNames = (() => { try { return new Intl.DisplayNames(['en'], { type: 'region' }); } catch { return null; } })();
-/** "GB" → "United Kingdom", "EU" → "Euro area". */
-export const countryName = (c) => (c === 'EU' ? 'Euro area' : (() => { try { return regionNames?.of(c) || c; } catch { return c; } })());
+const regionNames = (() => { try { return new Intl.DisplayNames([locale, 'en'], { type: 'region' }); } catch { return null; } })();
+/** "GB" → "United Kingdom", "EU" → "Euro area" (in the UI language). */
+export const countryName = (c) => (c === 'EU' ? t('news.euroArea') : (() => { try { return regionNames?.of(c) || c; } catch { return c; } })());
 /** The short label shown in the calendar: ISO codes, except "UK". */
 export const countryLabel = (c) => (c === 'GB' ? 'UK' : c);
 /** Whether a country is picked (['*'] picks every one). */
 export const inCountries = (c, list) => list.includes('*') || list.includes(c);
 /** "All countries", "Japan", "US, EU, UK +6". */
 export function countriesSummary(list) {
-  if (list.includes('*')) return 'All countries';
-  if (!list.length) return 'No countries';
+  if (list.includes('*')) return t('news.allCountries');
+  if (!list.length) return t('news.noCountries');
   if (list.length === 1) return countryName(list[0]);
   return list.slice(0, 3).map(countryLabel).join(', ') + (list.length > 3 ? ` +${list.length - 3}` : '');
 }
@@ -42,20 +44,20 @@ export function newsSymbol(full) {
 }
 
 /** "3m", "2h", "Mon 14:05" for older ones. */
-export function ago(t, now = Date.now() / 1000) {
-  const s = Math.max(0, now - t);
-  if (s < 60) return 'now';
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h`;
-  return new Date(t * 1000).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+export function ago(ts, now = Date.now() / 1000) {
+  const s = Math.max(0, now - ts);
+  if (s < 60) return t('news.ago.now');
+  if (s < 3600) return t('news.ago.m', { n: Math.floor(s / 60) });
+  if (s < 86400) return t('news.ago.h', { n: Math.floor(s / 3600) });
+  return new Date(ts * 1000).toLocaleString(locale, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
 /** "in 2h 14m", "in 3d 4h", "now". */
-export function countdown(t, now = Date.now() / 1000) {
-  const s = t - now;
-  if (s <= 60) return 'now';
+export function countdown(ts, now = Date.now() / 1000) {
+  const s = ts - now;
+  if (s <= 60) return t('news.in.now');
   const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
-  return d ? `in ${d}d ${h}h` : h ? `in ${h}h ${m}m` : `in ${m}m`;
+  return d ? t('news.in.dh', { d, h }) : h ? t('news.in.hm', { h, m }) : t('news.in.m', { m });
 }
 
 /** Stories for a topic chip, hottest first or newest first. */
@@ -68,21 +70,21 @@ const PCT_NAME = /MoM|YoY|QoQ|\bRate\b|\bInf\b|Inflation|Change|Utilization/i;
 /** An economic value as shown: 0.2 → "0.2%" for rates and changes, 1250 → "1,250". */
 export function fmtEcon(v, name = '') {
   if (v == null) return '—';
-  if (PCT_NAME.test(name)) return `${v}%`;
-  return Math.abs(v) >= 1000 ? v.toLocaleString('en-US') : String(v);
+  const n = typeof v === 'number' ? v.toLocaleString(locale, { maximumFractionDigits: 6 }) : String(v);
+  return PCT_NAME.test(name) ? `${n}%` : n;
 }
 
-const pct = (v) => (v == null ? '' : `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(Math.abs(v) >= 10 ? 1 : 2)}%`);
+const pct = (v) => (v == null ? '' : `${v > 0 ? '+' : v < 0 ? '−' : ''}${fixed(Math.abs(v), Math.abs(v) >= 10 ? 1 : 2)}%`);
 const cls = (v) => (v > 0 ? 'up' : v < 0 ? 'down' : '');
-const time = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-const dayKey = (t) => new Date(t * 1000).toDateString();
+const time = (ts) => new Date(ts * 1000).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+const dayKey = (ts) => new Date(ts * 1000).toDateString();
 
-function dayLabel(t) {
-  const d = new Date(t * 1000);
+function dayLabel(ts) {
+  const d = new Date(ts * 1000);
   const today = new Date();
   const diff = Math.round((new Date(d.toDateString()) - new Date(today.toDateString())) / 86400000);
-  const date = d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
-  return diff === 0 ? `Today · ${date}` : diff === 1 ? `Tomorrow · ${date}` : diff === -1 ? `Yesterday · ${date}` : date;
+  const date = d.toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short' });
+  return diff === 0 ? t('news.today', { date }) : diff === 1 ? t('news.tomorrow', { date }) : diff === -1 ? t('news.yesterday', { date }) : date;
 }
 
 export class NewsPanel {
@@ -139,11 +141,11 @@ export class NewsPanel {
     document.body.classList.add('news-open');
     window.dispatchEvent(new Event('resize'));
     if ((await dataMode()) !== 'server') {
-      this.body.innerHTML = `<div class="st-empty"><b>News runs in the desktop app</b>
-        <span>Headlines and the calendar come from sources a website can't read directly. Download the desktop app, or run it with <code>npm start</code>.</span></div>`;
+      this.body.innerHTML = `<div class="st-empty"><b>${t('news.desktopOnly')}</b>
+        <span>${t('news.desktopOnlyBody')}</span></div>`;
       return;
     }
-    if (!this.news) this.body.innerHTML = '<div class="st-empty"><b>Loading headlines and the calendar…</b><span>Reading a dozen news sources.</span></div>';
+    if (!this.news) this.body.innerHTML = `<div class="st-empty"><b>${t('news.loadingAll')}</b><span>${t('news.loadingAllBody')}</span></div>`;
     this.loadNews();
     this.loadCalendar();
     // Keep "in 2h 14m" and "5m ago" current between refreshes.
@@ -282,8 +284,8 @@ export class NewsPanel {
   chip(s, quotes) {
     const q = quotes?.[s];
     const full = q?.full || `YAHOO:${s}`;
-    const move = q?.c != null ? `<b class="${cls(q.c)}">${q.session === 'pre' ? 'pre ' : ''}${pct(q.c)}</b>` : '';
-    return `<button class="nw-tk" data-full="${esc(full)}" title="Open the ${esc(s)} chart">${esc(s)}${move}</button>`;
+    const move = q?.c != null ? `<b class="${cls(q.c)}">${q.session === 'pre' ? t('news.chipPre', { pct: pct(q.c) }) : pct(q.c)}</b>` : '';
+    return `<button class="nw-tk" data-full="${esc(full)}" title="${esc(t('news.openChart', { symbol: s }))}">${esc(s)}${move}</button>`;
   }
 
   render() {
@@ -313,34 +315,34 @@ export class NewsPanel {
     const now = Date.now() / 1000;
     const row = (s) => {
       const also = s.sources.slice(1).map((x) => `${x.source}: ${x.title}`).join('\n');
-      const flag = s.breaking ? '<span class="nw-flag breaking">Breaking</span>' : s.hot ? '<span class="nw-flag hot">Hot</span>' : '';
+      const flag = s.breaking ? `<span class="nw-flag breaking">${t('news.breaking')}</span>` : s.hot ? `<span class="nw-flag hot">${t('news.hot')}</span>` : '';
       return `<div class="nw-row${s.hot && !symbolView ? ' hot' : ''}${fresh.has(s.id) ? ' fresh' : ''}">
-        <span class="nw-time" data-t="${s.t}" title="${esc(new Date(s.t * 1000).toLocaleString())}">${ago(s.t, now)}</span>
+        <span class="nw-time" data-t="${s.t}" title="${esc(new Date(s.t * 1000).toLocaleString(locale))}">${ago(s.t, now)}</span>
         <div class="nw-main">
-          <a class="nw-title" href="${/^https?:\/\//.test(s.link) ? esc(s.link) : '#'}" target="_blank" rel="noopener noreferrer" title="Open the article">${symbolView ? '' : flag}${esc(s.title)}</a>
-          <div class="nw-meta"><span class="nw-src">${esc(s.source)}</span>${s.sources.length > 1 ? `<span class="nw-more" title="${esc(also)}">+${s.sources.length - 1} more</span>` : ''}${s.tickers.map((t) => this.chip(t, data.quotes)).join('')}</div>
+          <a class="nw-title" href="${/^https?:\/\//.test(s.link) ? esc(s.link) : '#'}" target="_blank" rel="noopener noreferrer" title="${esc(t('news.openArticle'))}">${symbolView ? '' : flag}${esc(s.title)}</a>
+          <div class="nw-meta"><span class="nw-src">${esc(s.source)}</span>${s.sources.length > 1 ? `<span class="nw-more" title="${esc(also)}">${t('news.moreSources', { n: s.sources.length - 1 })}</span>` : ''}${s.tickers.map((tk) => this.chip(tk, data.quotes)).join('')}</div>
         </div>
       </div>`;
     };
     const trending = this.news?.trending?.length && !symbolView
-      ? `<div class="nw-trending"><span class="muted">Trending</span>${this.news.trending.map((t) => this.chip(t, this.news.quotes)).join('')}</div>` : '';
-    const updated = data ? new Date(data.updated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-    const sourcesNote = data && !symbolView ? `${data.feeds.ok} of ${data.feeds.total} news sources answered. ` : '';
+      ? `<div class="nw-trending"><span class="muted">${t('news.trending')}</span>${this.news.trending.map((tk) => this.chip(tk, this.news.quotes)).join('')}</div>` : '';
+    const updated = data ? new Date(data.updated).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }) : '';
+    const sourcesNote = data && !symbolView ? `${t('news.sourcesNote', { ok: data.feeds.ok, total: data.feeds.total })} ` : '';
     let list;
-    if (!data) list = `<div class="st-empty"><b>${this.error ? "Couldn't load the news" : 'Loading…'}</b><span>${esc(this.error || '')}</span></div>`;
-    else if (!stories.length) list = `<div class="st-empty"><b>No headlines here yet</b><span>${symbolView ? `Nothing recent about ${esc(sym)}.` : 'Try another topic.'}</span></div>`;
+    if (!data) list = `<div class="st-empty"><b>${this.error ? t('news.loadError') : t('common.loading')}</b><span>${esc(this.error || '')}</span></div>`;
+    else if (!stories.length) list = `<div class="st-empty"><b>${t('news.empty')}</b><span>${symbolView ? esc(t('news.emptySymbol', { symbol: sym })) : t('news.emptyTopic')}</span></div>`;
     else list = stories.slice(0, 150).map(row).join('');
     feed.innerHTML = `
       <div class="nw-tools">
         <div class="nw-seg" role="tablist">
-          <button data-view="top" class="${st.view === 'top' ? 'on' : ''}" title="Ranked by what's moving markets: breaking, widely covered, about big or fast-moving stocks">Top stories</button>
-          <button data-view="latest" class="${st.view === 'latest' ? 'on' : ''}" title="Newest first">Latest</button>
-          <button data-view="symbol" class="${symbolView ? 'on' : ''}" title="News about the active chart's symbol"${sym ? '' : ' disabled'}>${esc(sym || 'Symbol')}</button>
+          <button data-view="top" class="${st.view === 'top' ? 'on' : ''}" title="${esc(t('news.topTitle'))}">${t('news.top')}</button>
+          <button data-view="latest" class="${st.view === 'latest' ? 'on' : ''}" title="${esc(t('news.latestTitle'))}">${t('news.latest')}</button>
+          <button data-view="symbol" class="${symbolView ? 'on' : ''}" title="${esc(t('news.symbolTitle'))}"${sym ? '' : ' disabled'}>${esc(sym || t('common.symbol'))}</button>
         </div>
         ${symbolView ? '' : `<div class="nw-topics">${TOPICS.map(([id, label]) => `<button data-topic="${id}" class="${st.topic === id ? 'on' : ''}">${label}<span>${counts[id]}</span></button>`).join('')}</div>`}
         <span class="spacer"></span>
-        ${symbolView ? '' : `<select class="select" data-f="region" aria-label="News region" title="Whose markets the headlines cover">${REGIONS.map(([id, label]) => `<option value="${id}"${st.region === id ? ' selected' : ''}>${label}</option>`).join('')}</select>`}
-        <span class="muted nw-updated" title="${sourcesNote}Headlines refresh every 30 seconds.">${this.error && data ? 'Offline, showing the last headlines · ' : ''}${updated ? `Updated ${updated}` : ''}</span>
+        ${symbolView ? '' : `<select class="select" data-f="region" aria-label="${esc(t('news.regionLabel'))}" title="${esc(t('news.regionTitle'))}">${REGIONS.map(([id, label]) => `<option value="${id}"${st.region === id ? ' selected' : ''}>${label}</option>`).join('')}</select>`}
+        <span class="muted nw-updated" title="${esc(sourcesNote + t('news.refreshNote'))}">${this.error && data ? `${t('news.offline')} · ` : ''}${updated ? t('news.updated', { time: updated }) : ''}</span>
       </div>
       ${trending}
       <div class="nw-list" tabindex="-1">${list}</div>`;
@@ -357,7 +359,7 @@ export class NewsPanel {
     let content;
     let next = '';
     if (!c) {
-      content = `<div class="st-empty"><b>${this.calError ? "Couldn't load the calendar" : 'Loading the calendar…'}</b><span>${esc(this.calError || '')}</span></div>`;
+      content = `<div class="st-empty"><b>${this.calError ? t('news.calError') : t('news.calLoading')}</b><span>${esc(this.calError || '')}</span></div>`;
     } else if (st.cal === 'econ') {
       const events = c.econ.filter((e) => e.t >= startOfYesterday && inCountries(e.c, st.countries) && (!st.keyOnly || e.tier >= 2));
       const hasForecast = events.some((e) => e.forecast != null);
@@ -365,40 +367,40 @@ export class NewsPanel {
       const ahead = events.filter((e) => e.t > now - 60 && e.actual == null && !e.tbc);
       const soon = ahead[0];
       const big = ahead.find((e) => e.tier === 3);
-      const part = (e, label) => `<span class="nw-next-item" data-next="${e.t}" title="${esc(`${countryName(e.c)}: ${e.name}, ${new Date(e.t * 1000).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`)}">${label} <span class="nw-count">${countdown(e.t, now)}</span> <b>${e.c === 'US' ? '' : `${esc(countryLabel(e.c))} `}${esc(e.name)}</b></span>`;
-      if (soon) next = `<div class="nw-next">${part(soon, 'Next:')}${big && big !== soon ? part(big, 'High impact:') : ''}</div>`;
+      const part = (e, label) => `<span class="nw-next-item" data-next="${e.t}" title="${esc(t('news.nextTitle', { country: countryName(e.c), event: e.name, time: new Date(e.t * 1000).toLocaleString(locale, { weekday: 'short', hour: '2-digit', minute: '2-digit' }) }))}">${label} <span class="nw-count">${countdown(e.t, now)}</span> <b>${e.c === 'US' ? '' : `${esc(countryLabel(e.c))} `}${esc(e.name)}</b></span>`;
+      if (soon) next = `<div class="nw-next">${part(soon, t('news.next'))}${big && big !== soon ? part(big, t('news.highImpact')) : ''}</div>`;
       const rowHtml = (e) => {
         const past = e.t < now;
         const justOut = e.actual != null && now - e.t < 3600;
-        const name = e.fed ? `${esc(e.name)}${e.sep ? ' <span class="muted">+ projections</span>' : ''} <span class="muted">· press conference 30 min later</span>` : `${esc(e.name)} <span class="muted">${esc(e.period)}</span>`;
+        const name = e.fed ? `${esc(e.name)}${e.sep ? ` <span class="muted">${t('news.fedProjections')}</span>` : ''} <span class="muted">${t('news.fedPress')}</span>` : `${esc(e.name)} <span class="muted">${esc(e.period)}</span>`;
         return `<tr class="${past ? 'past' : ''}${justOut ? ' just' : ''}${e.tier === 3 ? ' key' : ''}">
-          <td class="nw-ctime"${e.tbc ? ' title="Day not confirmed yet"' : ''}>${e.tbc ? 'TBC' : time(e.t)}</td>
+          <td class="nw-ctime"${e.tbc ? ` title="${esc(t('news.tbcTitle'))}"` : ''}>${e.tbc ? t('news.tbc') : time(e.t)}</td>
           <td class="nw-cc" title="${esc(countryName(e.c))}">${esc(countryLabel(e.c))}</td>
-          <td class="nw-imp t${e.tier}" title="${['', 'Low', 'Medium', 'High'][e.tier]} impact"><i></i><i></i><i></i></td>
+          <td class="nw-imp t${e.tier}" title="${e.tier >= 1 && e.tier <= 3 ? esc(t(`news.impact${e.tier}`)) : ''}"><i></i><i></i><i></i></td>
           <td class="nw-ev">${name}</td>
-          <td class="nw-num nw-act" title="Actual">${e.fed ? '' : fmtEcon(e.actual, e.name)}</td>
-          ${hasForecast ? `<td class="nw-num muted" title="Forecast">${e.fed ? '' : fmtEcon(e.forecast, e.name)}</td>` : ''}
-          <td class="nw-num muted" title="Previous">${e.fed ? '' : fmtEcon(e.prior, e.name)}</td>
+          <td class="nw-num nw-act" title="${esc(t('news.actual'))}">${e.fed ? '' : fmtEcon(e.actual, e.name)}</td>
+          ${hasForecast ? `<td class="nw-num muted" title="${esc(t('news.forecast'))}">${e.fed ? '' : fmtEcon(e.forecast, e.name)}</td>` : ''}
+          <td class="nw-num muted" title="${esc(t('news.previous'))}">${e.fed ? '' : fmtEcon(e.prior, e.name)}</td>
         </tr>`;
       };
-      content = this.groupByDay(events, rowHtml, `<tr><th></th><th></th><th></th><th class="l">Release</th><th>Actual</th>${hasForecast ? '<th>Forecast</th>' : ''}<th>Previous</th></tr>`)
-        || `<div class="st-empty"><b>No releases in the next week</b><span>${st.keyOnly ? 'Turn off "Key only" or pick more countries.' : 'Pick more countries.'}</span></div>`;
+      content = this.groupByDay(events, rowHtml, `<tr><th></th><th></th><th></th><th class="l">${t('news.release')}</th><th>${t('news.actual')}</th>${hasForecast ? `<th>${t('news.forecast')}</th>` : ''}<th>${t('news.previous')}</th></tr>`)
+        || `<div class="st-empty"><b>${t('news.noReleases')}</b><span>${esc(st.keyOnly ? t('news.noReleasesKeyOnly') : t('news.pickMore'))}</span></div>`;
     } else {
       const reports = c.earnings.filter((e) => e.t >= startOfYesterday && inCountries(e.c, st.countries) && (e.m || 0) >= st.minCap);
       const rowHtml = (e) => {
-        const when = e.when === 'bmo' ? 'Before open' : e.when === 'amc' ? 'After close' : '';
-        return `<tr class="nw-er" data-full="YAHOO:${esc(e.s)}" title="Open the ${esc(e.s)} chart">
+        const when = e.when === 'bmo' ? t('news.beforeOpen') : e.when === 'amc' ? t('news.afterClose') : '';
+        return `<tr class="nw-er" data-full="YAHOO:${esc(e.s)}" title="${esc(t('news.openChart', { symbol: e.s }))}">
           <td class="nw-ctime">${when || '<span class="muted">—</span>'}</td>
           <td class="nw-cc" title="${esc(countryName(e.c))}">${esc(countryLabel(e.c))}</td>
           <td class="nw-ev"><b>${esc(e.s)}</b> <span class="muted">${esc(e.n)}</span></td>
-          <td class="nw-num muted" title="EPS forecast">${e.est ?? '—'}</td>
-          <td class="nw-num ${e.surprise != null ? cls(e.surprise) : ''}" title="EPS reported">${e.act ?? '—'}</td>
-          <td class="nw-num ${cls(e.surprise)}" title="Surprise">${e.surprise != null ? pct(e.surprise) : ''}</td>
+          <td class="nw-num muted" title="${esc(t('news.epsForecast'))}">${e.est ?? '—'}</td>
+          <td class="nw-num ${e.surprise != null ? cls(e.surprise) : ''}" title="${esc(t('news.epsReported'))}">${e.act ?? '—'}</td>
+          <td class="nw-num ${cls(e.surprise)}" title="${esc(t('news.surprise'))}">${e.surprise != null ? pct(e.surprise) : ''}</td>
           <td class="nw-num muted">${fmtCap(e.m)}</td>
         </tr>`;
       };
-      content = this.groupByDay(reports, rowHtml, '<tr><th></th><th></th><th>Company</th><th title="In the currency the company reports in">EPS est.</th><th>EPS</th><th>Surprise</th><th>Mkt cap</th></tr>')
-        || '<div class="st-empty"><b>No reports from companies this size</b><span>Try a smaller market cap or more countries.</span></div>';
+      content = this.groupByDay(reports, rowHtml, `<tr><th></th><th></th><th>${t('news.company')}</th><th title="${esc(t('news.epsEstTitle'))}">${t('news.epsEst')}</th><th>EPS</th><th>${t('news.surprise')}</th><th>${t('news.mktCap')}</th></tr>`)
+        || `<div class="st-empty"><b>${t('news.noReports')}</b><span>${t('news.noReportsHint')}</span></div>`;
     }
     const oldList = box.querySelector('.nw-cal-list');
     const scroll = oldList?.scrollTop;
@@ -408,21 +410,21 @@ export class NewsPanel {
       <span class="nw-cc">${esc(countryLabel(cc))}</span><span class="nw-pop-name">${esc(countryName(cc))}</span><span class="muted">${n || ''}</span></label>`;
     const majors = countries.filter(([cc]) => MAJOR.includes(cc));
     const others = countries.filter(([cc]) => !MAJOR.includes(cc));
-    const pop = this.pickOpen ? `<div class="nw-pop" role="dialog" aria-label="Calendar countries">
-        <div class="nw-pop-sets"><button data-ccset="major">Major</button><button data-ccset="us">US only</button><button data-ccset="all">All</button></div>
-        <div class="nw-pop-list">${countries.length ? `<div class="nw-pop-head">Major economies</div>${majors.map(row).join('')}${others.length ? `<div class="nw-pop-head">More countries</div>${others.map(row).join('')}` : ''}` : '<div class="nw-pop-head">Loading…</div>'}</div>
+    const pop = this.pickOpen ? `<div class="nw-pop" role="dialog" aria-label="${esc(t('news.countriesLabel'))}">
+        <div class="nw-pop-sets"><button data-ccset="major">${t('news.setMajor')}</button><button data-ccset="us">${t('news.setUs')}</button><button data-ccset="all">${t('common.all')}</button></div>
+        <div class="nw-pop-list">${countries.length ? `<div class="nw-pop-head">${t('news.majorEconomies')}</div>${majors.map(row).join('')}${others.length ? `<div class="nw-pop-head">${t('news.moreCountries')}</div>${others.map(row).join('')}` : ''}` : `<div class="nw-pop-head">${t('common.loading')}</div>`}</div>
       </div>` : '';
     box.innerHTML = `
       <div class="nw-tools">
         <div class="nw-seg" role="tablist">
-          <button data-cal="econ" class="${st.cal === 'econ' ? 'on' : ''}">Economic calendar</button>
-          <button data-cal="earnings" class="${st.cal === 'earnings' ? 'on' : ''}">Earnings</button>
+          <button data-cal="econ" class="${st.cal === 'econ' ? 'on' : ''}">${t('news.econCal')}</button>
+          <button data-cal="earnings" class="${st.cal === 'earnings' ? 'on' : ''}">${t('news.topic.earnings')}</button>
         </div>
         <span class="spacer"></span>
-        <button class="nw-pick${this.pickOpen ? ' on' : ''}" aria-expanded="${this.pickOpen}" title="Countries to show">${esc(countriesSummary(st.countries))} <span aria-hidden="true">▾</span></button>
+        <button class="nw-pick${this.pickOpen ? ' on' : ''}" aria-expanded="${this.pickOpen}" title="${esc(t('news.countriesTitle'))}">${esc(countriesSummary(st.countries))} <span aria-hidden="true">▾</span></button>
         ${st.cal === 'econ'
-    ? `<label class="nw-check" title="Hide low-impact releases"><input type="checkbox" data-f="keyOnly"${st.keyOnly ? ' checked' : ''}> Key only</label>`
-    : `<select class="select" data-f="minCap" aria-label="Market cap">${CAPS.map(([v, l]) => `<option value="${v}"${st.minCap === v ? ' selected' : ''}>${l}</option>`).join('')}</select>`}
+    ? `<label class="nw-check" title="${esc(t('news.keyOnlyTitle'))}"><input type="checkbox" data-f="keyOnly"${st.keyOnly ? ' checked' : ''}> ${t('news.keyOnly')}</label>`
+    : `<select class="select" data-f="minCap" aria-label="${esc(t('news.marketCap'))}">${CAPS.map(([v, l]) => `<option value="${v}"${st.minCap === v ? ' selected' : ''}>${l}</option>`).join('')}</select>`}
       </div>
       ${next}
       <div class="nw-cal-list">${content}</div>

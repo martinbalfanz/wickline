@@ -2,7 +2,8 @@
 // and only streams live prices for the rows you can see.
 
 import { QuoteStream, displayTicker, sourceName } from './datafeed.js';
-import { esc, formatNumber, smartDecimals } from './util.js';
+import { esc, formatNumber, smartDecimals, fixed } from './util.js';
+import { t, locale } from './i18n.js';
 
 const ROW_H = 42;
 const OVERSCAN = 8;
@@ -92,7 +93,8 @@ export class MarketBrowser {
     }
     this.view = v;
     this.countEl.textContent = this.all.length
-      ? (v.length === this.all.length ? `${v.length.toLocaleString()} instruments` : `${v.length.toLocaleString()} of ${this.all.length.toLocaleString()}`)
+      ? (v.length === this.all.length ? t('mk.count', { n: v.length.toLocaleString(locale) })
+        : t('mk.countOf', { a: v.length.toLocaleString(locale), b: this.all.length.toLocaleString(locale) }))
       : '';
     this.render();
     this.scheduleLive(0);
@@ -116,7 +118,7 @@ export class MarketBrowser {
     const n = this.view.length;
     if (!n) {
       this.inner.style.height = 'auto';
-      this.inner.innerHTML = `<div class="wl-empty">${esc(this.message || 'No matches.')}</div>`;
+      this.inner.innerHTML = `<div class="wl-empty">${esc(this.message || t('mk.noMatches'))}</div>`;
       return;
     }
     this.inner.style.height = `${n * ROW_H}px`;
@@ -131,13 +133,13 @@ export class MarketBrowser {
     const price = q?.price ?? r.price;
     const change = q?.change ?? r.change;
     const prec = q?.precision ?? r.precision ?? smartDecimals(price);
-    const chg = Number.isFinite(change) ? `${change >= 0 ? '+' : ''}${change.toFixed(2)}%` : '—';
+    const chg = Number.isFinite(change) ? `${change >= 0 ? '+' : ''}${fixed(change, 2)}%` : '—';
     const starred = this.opts.isStarred?.(r.full);
     return `<div class="wl-row${r.full === this.active ? ' active' : ''}" data-sym="${esc(r.full)}" style="top:${i * ROW_H}px" title="${esc(r.name || '')}">
       <span class="wl-sym"><b>${esc(r.ticker || displayTicker(r.full))}</b><small>${esc(r.name || sourceName(r.full))}</small></span>
       <span class="wl-price">${Number.isFinite(price) ? formatNumber(price, prec) : '—'}</span>
       <span class="wl-chg${Number.isFinite(change) ? (change >= 0 ? ' up' : ' down') : ''}">${chg}</span>
-      <button class="wl-star${starred ? ' on' : ''}" title="Add to / remove from watchlist" aria-label="Toggle watchlist">${ICON_STAR}</button>
+      <button class="wl-star${starred ? ' on' : ''}" title="${t('mk.watchToggleTitle')}" aria-label="${t('mk.watchToggleAria')}">${ICON_STAR}</button>
     </div>`;
   }
 
@@ -162,7 +164,7 @@ export class MarketBrowser {
     const r = this.view.find((x) => x.full === full);
     price.textContent = formatNumber(next.price, next.precision ?? r?.precision ?? smartDecimals(next.price));
     if (Number.isFinite(next.change)) {
-      chg.textContent = `${next.change >= 0 ? '+' : ''}${next.change.toFixed(2)}%`;
+      chg.textContent = `${next.change >= 0 ? '+' : ''}${fixed(next.change, 2)}%`;
       chg.className = `wl-chg ${next.change >= 0 ? 'up' : 'down'}`;
     }
     const old = prev?.price ?? r?.price;

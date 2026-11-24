@@ -9,6 +9,7 @@ import { apiUrl, dataMode } from './env.js';
 import { YahooDirectStream } from './yahoo-direct.js';
 import { tdBars, tdSearch, tdQuotes } from './twelvedata.js';
 import { store } from './util.js';
+import { t } from './i18n.js';
 import { tfById, basePlan, aggregateUtc, groupBars, utcBucket, sessionStart } from './timeframes.js';
 
 // Any timeframe works (see timeframes.js); these are the ones the app has always had.
@@ -63,6 +64,9 @@ async function getJson(url) {
 // Binance spot and USDⓈ-M futures
 // ---------------------------------------------------------------------------
 
+/** "BTC / USDT", or "BTC / USDT perpetual" for Binance futures (in the UI language). */
+const pairName = (src, base, quote) => (src === 'BINANCEF' ? t('feed.perpName', { base, quote }) : `${base} / ${quote}`);
+
 const BINANCE = {
   BINANCE: {
     rest: ['https://data-api.binance.vision', 'https://api.binance.com'],
@@ -83,7 +87,7 @@ const backoffUntil = { BINANCE: 0, BINANCEF: 0 };
 
 async function binanceGet(src, path) {
   if (Date.now() < backoffUntil[src]) {
-    throw Object.assign(new Error(`${SOURCES[src].name} asked for fewer requests; trying again shortly`), { status: 429 });
+    throw Object.assign(new Error(t('feed.backoff', { source: SOURCES[src].name })), { status: 429 });
   }
   const hosts = BINANCE[src].rest;
   let lastErr;
@@ -94,7 +98,7 @@ async function binanceGet(src, path) {
       restIndex[src] = idx;
       return body;
     } catch (e) {
-      lastErr = e.status ? e : new Error(`Cannot reach ${SOURCES[src].name}`);
+      lastErr = e.status ? e : new Error(t('feed.unreachable', { source: SOURCES[src].name }));
       if (e.status === 400) break; // invalid symbol etc. — another host will say the same
     }
   }
@@ -218,7 +222,7 @@ class BinanceFeed {
     return {
       meta: {
         symbol: this.ticker,
-        name: s?.baseAsset ? `${s.baseAsset} / ${s.quoteAsset}${this.src === 'BINANCEF' ? ' perpetual' : ''}` : this.ticker,
+        name: s?.baseAsset ? pairName(this.src, s.baseAsset, s.quoteAsset) : this.ticker,
         exchange: SOURCES[this.src].name,
         currency: s?.quoteAsset || '',
         type: 'crypto',
@@ -682,7 +686,7 @@ async function searchList(src, list, q, limit) {
   return scored.slice(0, limit).map(({ s }) => ({
     full: `${src}:${s.ticker}`,
     ticker: s.ticker + (SOURCES[src].suffix || ''),
-    name: `${s.base} / ${s.quote || '?'}${src === 'BINANCEF' ? ' perpetual' : ''}`,
+    name: pairName(src, s.base, s.quote || '?'),
     exchange: SOURCES[src].name,
     type: src === 'BINANCEF' ? 'Crypto perpetual' : 'Crypto',
     category: 'crypto',
@@ -750,11 +754,11 @@ export async function loadUniverse(id) {
         return {
           full: `${src}:${r.symbol}`,
           ticker: r.symbol + (SOURCES[src].suffix || ''),
-          name: `${base} / ${quote || '?'}${src === 'BINANCEF' ? ' perpetual' : ''}`,
+          name: pairName(src, base, quote || '?'),
           price: +r.lastPrice,
           change: src === 'BINANCEF' ? +r.priceChangePercent : pct(+r.lastPrice, +r.openPrice),
           rank: Number(r.count),
-          sector: quote || 'Other',
+          sector: quote || t('feed.otherSector'),
         };
       });
     }

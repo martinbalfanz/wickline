@@ -16,7 +16,7 @@ const id = (text) => parseTf(text)?.id ?? null;
 const utc = (s) => Date.parse(`${s}Z`) / 1000; // '2026-11-23T09:30' → seconds
 const bar = (time, o, h, l, c, v = 1) => ({ time, open: o, high: h, low: l, close: c, volume: v });
 
-test('plain numbers are minutes, whole hours become hours (like TradingView)', () => {
+test('plain numbers are minutes, whole hours become hours', () => {
   assert.equal(id('45'), '45m');
   assert.equal(id('1'), '1m');
   assert.equal(id('60'), '1h');

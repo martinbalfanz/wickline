@@ -6,7 +6,8 @@
 // The formatting helpers are pure and unit-tested in test/options.test.mjs.
 
 import { apiUrl, dataMode } from './env.js';
-import { $, esc, numberFormat, store } from './util.js';
+import { $, esc, numberFormat, store, fixed } from './util.js';
+import { t, locale } from './i18n.js';
 
 const CONTRACT = /^YAHOO:([A-Z][A-Z0-9.]{0,6}?)(\d{6})([CP])(\d{8})$/;
 // Option roots that aren't the underlying's ticker: index options (weeklies too) and share classes.
@@ -27,15 +28,15 @@ export const daysLeft = (at, now = Date.now()) => Math.max(0, Math.floor((at * 1
 /** "8h" or "11d" until an expiry. */
 export function timeLeft(at, now = Date.now()) {
   const h = (at * 1000 - now) / 3600000;
-  if (h <= 0) return 'expired';
-  return h < 24 ? `${Math.max(1, Math.round(h))}h` : `${daysLeft(at, now)}d`;
+  if (h <= 0) return t('opt.expired');
+  return h < 24 ? t('opt.hours', { n: Math.max(1, Math.round(h)) }) : t('opt.days', { n: daysLeft(at, now) });
 }
 
 /** An expiry for the menu: "Fri, Dec 4 · 11d" ("Dec 17, 2027 · 389d" in another year). */
 export function expiryLabel(e, now = Date.now()) {
   const d = new Date(e.t * 1000);
   const other = d.getUTCFullYear() !== new Date(now).getUTCFullYear();
-  const date = d.toLocaleDateString('en-US', { timeZone: 'UTC', weekday: other ? undefined : 'short', month: 'short', day: 'numeric', year: other ? 'numeric' : undefined });
+  const date = d.toLocaleDateString(locale, { timeZone: 'UTC', weekday: other ? undefined : 'short', month: 'short', day: 'numeric', year: other ? 'numeric' : undefined });
   return `${date} · ${timeLeft(e.at, now)}`;
 }
 
@@ -53,12 +54,12 @@ export function fmtCount(v) {
 }
 
 /** A strike: "690", "342.5", "61,500". */
-export const fmtStrike = (v) => (v == null ? '—' : typeof v === 'number' ? numberFormat(undefined, 2).format(v) : v.toLocaleString('en-US', { maximumFractionDigits: 2 }));
+export const fmtStrike = (v) => (v == null ? '—' : typeof v === 'number' ? numberFormat(undefined, 2).format(v) : v.toLocaleString(locale, { maximumFractionDigits: 2 }));
 /** A volatility: 0.2531 → "25.3%". */
-export const fmtIv = (v) => (v == null || !Number.isFinite(v) ? '—' : `${(v * 100).toFixed(1)}%`);
-const fmtPct = (v, d = 2) => (v == null || !Number.isFinite(v) ? '—' : `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(d)}%`);
-const fmtGreek = (v, d) => (v == null || !Number.isFinite(v) ? '—' : `${v < 0 ? '−' : ''}${Math.abs(v).toFixed(d)}`);
-const fmtRatio = (v) => (v == null || !Number.isFinite(v) ? '—' : v.toFixed(2));
+export const fmtIv = (v) => (v == null || !Number.isFinite(v) ? '—' : `${fixed(v * 100, 1)}%`);
+const fmtPct = (v, d = 2) => (v == null || !Number.isFinite(v) ? '—' : `${v > 0 ? '+' : v < 0 ? '−' : ''}${fixed(Math.abs(v), d)}%`);
+const fmtGreek = (v, d) => (v == null || !Number.isFinite(v) ? '—' : `${v < 0 ? '−' : ''}${fixed(Math.abs(v), d)}`);
+const fmtRatio = (v) => (v == null || !Number.isFinite(v) ? '—' : fixed(v, 2));
 const cls = (v) => (v > 0 ? 'up' : v < 0 ? 'down' : '');
 
 /**
@@ -81,8 +82,8 @@ export function oiWindow(rows, spot, maxPainStrike = null, max = 60) {
 }
 
 const SIDE_COLS = ['last', 'bid', 'ask', 'volume', 'oi', 'iv', 'delta'];
-const COL_NAMES = { last: 'Last', bid: 'Bid', ask: 'Ask', volume: 'Vol', oi: 'OI', iv: 'IV', delta: 'Delta' };
-const COL_TIPS = { last: 'Last trade', volume: 'Volume today', oi: 'Open interest: contracts outstanding', iv: 'Implied volatility', delta: 'Black-Scholes delta' };
+const COL_NAMES = { last: t('common.last'), bid: t('opt.col.bid'), ask: t('opt.col.ask'), volume: t('opt.col.vol'), oi: t('opt.col.oi'), iv: 'IV', delta: t('opt.delta') };
+const COL_TIPS = { last: t('opt.lastTrade'), volume: t('opt.col.volTip'), oi: t('opt.col.oiTip'), iv: t('opt.col.ivTip'), delta: t('opt.col.deltaTip') };
 const cell = (c, k) => {
   if (!c) return '';
   const v = c[k];
@@ -164,8 +165,8 @@ export class OptionsPanel {
     if ((await dataMode()) !== 'server') {
       $('#op-tools').innerHTML = '';
       $('#op-src').textContent = '';
-      this.body.innerHTML = `<div class="st-empty"><b>Options run in the desktop app</b>
-        <span>Option chains for US stocks and ETFs (Yahoo) and for Bitcoin and Ether (Deribit) come from sources a website can't read directly. Download the desktop app, or run it with <code>npm start</code>.</span></div>`;
+      this.body.innerHTML = `<div class="st-empty"><b>${esc(t('opt.desktop'))}</b>
+        <span>${t('opt.desktopHelp')}</span></div>`;
       return;
     }
     const sym = this.underlyingOf(this.getActiveSymbol?.());
@@ -231,20 +232,20 @@ export class OptionsPanel {
 
   showLoading() {
     $('#op-symbol').textContent = this.symbol.replace(/^[A-Z]+:/, '');
-    this.body.innerHTML = '<div class="st-empty"><b>Loading the option chain…</b><span>Strikes, quotes and open interest for the nearest expiry.</span></div>';
+    this.body.innerHTML = `<div class="st-empty"><b>${esc(t('opt.loading'))}</b><span>${esc(t('opt.loadingHelp'))}</span></div>`;
   }
 
   showError(msg, retry = true) {
     this.clearTools();
-    this.body.innerHTML = `<div class="st-empty"><b>Couldn't load options</b><span>${esc(msg)}</span>
-      ${retry ? '<button type="button" class="btn-ghost op-retry" data-op-retry="1">Try again</button>' : ''}</div>`;
+    this.body.innerHTML = `<div class="st-empty"><b>${esc(t('opt.loadFailed'))}</b><span>${esc(msg)}</span>
+      ${retry ? `<button type="button" class="btn-ghost op-retry" data-op-retry="1">${esc(t('opt.tryAgain'))}</button>` : ''}</div>`;
   }
 
   async load() {
     clearTimeout(this.timer);
     const gen = ++this.gen;
     const symbol = this.symbol;
-    if (!symbol) { this.body.innerHTML = '<div class="st-empty"><b>No chart selected</b></div>'; return; }
+    if (!symbol) { this.body.innerHTML = `<div class="st-empty"><b>${esc(t('opt.noChart'))}</b></div>`; return; }
     // Hidden (minimised or covered): no fetching or drawing until visibilitychange says it's back.
     this.stalled = document.hidden;
     if (this.stalled) return;
@@ -263,7 +264,7 @@ export class OptionsPanel {
         this.renderNone(j.none);
         return; // nothing to refresh
       }
-      if (!Array.isArray(j.rows)) throw new Error('Unexpected answer from the server');
+      if (!Array.isArray(j.rows)) throw new Error(t('opt.badAnswer'));
       // this.expiry stays what was picked (or null): the server moves past an expiry once it has
       // expired, which pinning the one it chose would stop.
       this.data = j;
@@ -288,7 +289,7 @@ export class OptionsPanel {
   renderNone(msg) {
     this.clearTools();
     $('#op-symbol').textContent = this.symbol.replace(/^[A-Z]+:/, '');
-    this.body.innerHTML = `<div class="st-empty op-none"><b>No options for ${esc(this.symbol.replace(/^[A-Z]+:/, ''))}</b><span>${esc(msg)}</span></div>`;
+    this.body.innerHTML = `<div class="st-empty op-none"><b>${esc(t('opt.none', { symbol: this.symbol.replace(/^[A-Z]+:/, '') }))}</b><span>${esc(msg)}</span></div>`;
   }
 
   onChange(e) {
@@ -322,36 +323,39 @@ export class OptionsPanel {
     const toolsKey = [this.symbol, d.expiry, ...d.expiries.map((e) => `${e.t}:${timeLeft(e.at, now)}`)].join('|');
     if (toolsKey !== this.toolsKey || !$('#op-tools select')) { // unchanged: don't rebuild (and close) an open menu
       this.toolsKey = toolsKey;
-      $('#op-tools').innerHTML = `<select class="select" data-f="expiry" aria-label="Expiry" title="Expiry (days left)">${d.expiries.map((e) =>
+      $('#op-tools').innerHTML = `<select class="select" data-f="expiry" aria-label="${esc(t('opt.expiry'))}" title="${esc(t('opt.expiryTip'))}">${d.expiries.map((e) =>
         `<option value="${e.t}"${e.t === d.expiry ? ' selected' : ''}>${esc(expiryLabel(e, now))}</option>`).join('')}</select>
-        <span class="muted op-count">${d.expiries.length} expiries</span>`;
+        <span class="muted op-count">${esc(t('opt.expiries', { n: d.expiries.length }))}</span>`;
     }
     const src = $('#op-src');
     src.className = `op-src ${d.delayed ? 'muted' : 'op-live'}`;
-    src.innerHTML = d.delayed ? 'Delayed ~15 min · Yahoo' : '<i></i>Real time · Deribit';
+    src.innerHTML = d.delayed ? esc(t('opt.src.delayed')) : `<i></i>${esc(t('opt.src.live'))}`;
 
     const sp = st.spot;
     const fromSpot = (k) => (k != null && sp ? fmtPct(((k - sp) / sp) * 100) : '');
     const kpi = (label, value, small = '', tip = '', klass = '') => `<div class="st-kpi"${tip ? ` title="${esc(tip)}"` : ''}><span>${esc(label)}</span><b class="${klass}">${value}</b><small>${small}</small></div>`;
     const kpis = [
-      kpi(u.name || u.symbol, fmtPrice(u.price), u.change != null ? `<span class="${cls(u.change)}">${fmtPct(u.change)}</span> today` : d.source === 'deribit' ? `index · forward ${fmtPrice(u.forward)}` : '',
-        d.source === 'deribit' ? 'Deribit index price (the chain is priced off the expiry\'s forward)' : `${u.symbol} last price`),
-      kpi('Expiry', esc(new Date(d.expiry * 1000).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' })),
-        esc(`${timeLeft(d.expiresAt, now)} left`), `Expires ${new Date(d.expiresAt * 1000).toLocaleString()}`),
-      kpi('ATM IV', fmtIv(st.atmIv), st.atmStrike != null ? `strike ${fmtStrike(st.atmStrike)}` : '', 'Implied volatility of the at-the-money call and put'),
-      kpi('Expected move', st.straddle != null ? `±${fmtPrice(st.straddle)}` : '—', st.straddlePct != null ? `±${st.straddlePct.toFixed(2)}% · straddle` : 'straddle',
-        'The at-the-money straddle (call + put): what the market prices in by expiry'),
-      kpi('1σ move', st.sigmaMove != null ? `±${fmtPrice(st.sigmaMove)}` : '—', st.sigmaPct != null ? `±${st.sigmaPct.toFixed(2)}% · from IV` : 'from IV',
-        'One standard deviation by expiry: price × ATM IV × √(years left). About 68% odds of ending inside it'),
-      kpi('Put/call', fmtRatio(st.pcVolume), `volume · OI ${fmtRatio(st.pcOi)}`, `Puts ÷ calls. Volume ${fmtCount(st.putVolume)} ÷ ${fmtCount(st.callVolume)}; open interest ${fmtCount(st.putOi)} ÷ ${fmtCount(st.callOi)}`,
+      kpi(u.name || u.symbol, fmtPrice(u.price), u.change != null ? t('opt.today', { change: `<span class="${cls(u.change)}">${fmtPct(u.change)}</span>` })
+        : d.source === 'deribit' ? esc(t('opt.indexForward', { price: fmtPrice(u.forward) })) : '',
+        d.source === 'deribit' ? t('opt.indexTip') : t('opt.lastTip', { symbol: u.symbol })),
+      kpi(t('opt.expiry'), esc(new Date(d.expiry * 1000).toLocaleDateString(locale, { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' })),
+        esc(t('opt.left', { time: timeLeft(d.expiresAt, now) })), t('opt.expiresTip', { time: new Date(d.expiresAt * 1000).toLocaleString(locale) })),
+      kpi(t('opt.atmIv'), fmtIv(st.atmIv), st.atmStrike != null ? esc(t('opt.strikeAt', { strike: fmtStrike(st.atmStrike) })) : '', t('opt.atmIvTip')),
+      kpi(t('opt.expectedMove'), st.straddle != null ? `±${fmtPrice(st.straddle)}` : '—',
+        esc(st.straddlePct != null ? t('opt.straddlePct', { pct: fixed(st.straddlePct, 2) }) : t('opt.straddle')), t('opt.expectedMoveTip')),
+      kpi(t('opt.sigma'), st.sigmaMove != null ? `±${fmtPrice(st.sigmaMove)}` : '—',
+        esc(st.sigmaPct != null ? t('opt.fromIvPct', { pct: fixed(st.sigmaPct, 2) }) : t('opt.fromIv')), t('opt.sigmaTip')),
+      kpi(t('opt.pc'), fmtRatio(st.pcVolume), esc(t('opt.pcSmall', { ratio: fmtRatio(st.pcOi) })),
+        t('opt.pcTip', { putVol: fmtCount(st.putVolume), callVol: fmtCount(st.callVolume), putOi: fmtCount(st.putOi), callOi: fmtCount(st.callOi) }),
         st.pcVolume > 1 ? 'down' : st.pcVolume != null && st.pcVolume < 0.7 ? 'up' : ''),
-      kpi('Max pain', st.maxPain != null ? fmtStrike(st.maxPain) : '—', st.maxPain != null ? `${fromSpot(st.maxPain)} from price` : st.oiMissing ? 'no open interest yet' : '',
-        'The strike where this expiry\'s options are worth least to their holders'),
+      kpi(t('opt.maxPain'), st.maxPain != null ? fmtStrike(st.maxPain) : '—',
+        esc(st.maxPain != null ? t('opt.fromPrice', { pct: fromSpot(st.maxPain) }) : st.oiMissing ? t('opt.noOiYet') : ''), t('opt.maxPainTip')),
     ];
 
     // The chain: calls | strike | puts, with a line where the price is.
-    const head = `<thead><tr class="op-grp"><th colspan="${SIDE_COLS.length}" class="op-calls">Calls</th><th></th><th colspan="${SIDE_COLS.length}" class="op-puts">Puts</th></tr>
-      <tr>${SIDE_COLS.map((k) => `<th${COL_TIPS[k] ? ` title="${COL_TIPS[k]}"` : ''}>${COL_NAMES[k]}</th>`).join('')}<th class="op-k">Strike</th>${[...SIDE_COLS].reverse().map((k) => `<th${COL_TIPS[k] ? ` title="${COL_TIPS[k]}"` : ''}>${COL_NAMES[k]}</th>`).join('')}</tr></thead>`;
+    const th = (k) => `<th${COL_TIPS[k] ? ` title="${esc(COL_TIPS[k])}"` : ''}>${esc(COL_NAMES[k])}</th>`;
+    const head = `<thead><tr class="op-grp"><th colspan="${SIDE_COLS.length}" class="op-calls">${esc(t('opt.calls'))}</th><th></th><th colspan="${SIDE_COLS.length}" class="op-puts">${esc(t('opt.puts'))}</th></tr>
+      <tr>${SIDE_COLS.map(th).join('')}<th class="op-k">${esc(t('opt.strike'))}</th>${[...SIDE_COLS].reverse().map(th).join('')}</tr></thead>`;
     const html = [];
     let spotDone = false;
     const spotRow = `<tr class="op-spot"><td colspan="${SIDE_COLS.length * 2 + 1}"><span>${esc(u.symbol)} ${fmtPrice(sp)}</span></td></tr>`;
@@ -374,11 +378,11 @@ export class OptionsPanel {
         <div class="op-chain${clickable ? ' clickable' : ''}" tabindex="0"><table class="op-table">${head}<tbody>${html.join('')}</tbody></table></div>
         <aside class="op-side">
           <div class="op-box op-oi">
-            <div class="op-h"><b>Open interest by strike</b><span class="op-key"><i class="up"></i>Calls <i class="down"></i>Puts <i class="op-mp"></i>Max pain</span></div>
-            <div class="op-canvas"><canvas aria-label="Open interest by strike"></canvas></div>
+            <div class="op-h"><b>${esc(t('opt.oiByStrike'))}</b><span class="op-key"><i class="up"></i>${esc(t('opt.calls'))} <i class="down"></i>${esc(t('opt.puts'))} <i class="op-mp"></i>${esc(t('opt.maxPain'))}</span></div>
+            <div class="op-canvas"><canvas aria-label="${esc(t('opt.oiByStrike'))}"></canvas></div>
           </div>
           <div class="op-box op-ua">
-            <div class="op-h"><b>Unusual activity</b><span class="muted" title="Contracts whose volume today is at least twice their open interest: mostly new positions">volume ≫ open interest</span></div>
+            <div class="op-h"><b>${esc(t('opt.unusual'))}</b><span class="muted" title="${esc(t('opt.unusualTip'))}">${esc(t('opt.unusualKey'))}</span></div>
             <div class="op-ua-list">${this.unusualHtml()}</div>
           </div>
         </aside>
@@ -399,17 +403,17 @@ export class OptionsPanel {
   unusualHtml() {
     const d = this.data;
     if (d.stats.oiMissing) {
-      return `<div class="op-note">${d.source === 'yahoo' ? 'Yahoo isn\'t reporting open interest right now (it fills in during US market hours), so new positions can\'t be told apart.' : 'No open interest reported for this expiry.'}</div>`;
+      return `<div class="op-note">${esc(d.source === 'yahoo' ? t('opt.noOiYahoo') : t('opt.noOiExpiry'))}</div>`;
     }
-    if (!d.unusual.length) return '<div class="op-note">Nothing unusual: no contract traded more than twice its open interest.</div>';
+    if (!d.unusual.length) return `<div class="op-note">${esc(t('opt.nothingUnusual'))}</div>`;
     const unit = d.source === 'deribit' ? ` ${esc(d.unit)}` : '';
     return d.unusual.map((x) => {
-      const chart = d.source === 'yahoo' ? ` data-op-chart="${esc(x.symbol)}" title="Open ${esc(x.symbol)}'s chart"` : ` title="${esc(x.symbol)}"`;
+      const chart = d.source === 'yahoo' ? ` data-op-chart="${esc(x.symbol)}" title="${esc(t('opt.openChart', { symbol: x.symbol }))}"` : ` title="${esc(x.symbol)}"`;
       return `<button type="button" class="op-ua-row${d.source === 'yahoo' ? '' : ' static'}"${chart}>
-        <b class="op-cp ${x.type === 'C' ? 'up' : 'down'}">${x.type === 'C' ? 'Call' : 'Put'}</b>
+        <b class="op-cp ${x.type === 'C' ? 'up' : 'down'}">${esc(x.type === 'C' ? t('opt.call') : t('opt.put'))}</b>
         <span class="op-ua-k">${fmtStrike(x.strike)}</span>
-        <span class="muted">Vol ${fmtCount(x.volume)}${unit} · OI ${fmtCount(x.oi)}</span>
-        <b class="op-ua-x">${x.ratio != null ? `${x.ratio >= 10 ? Math.round(x.ratio) : x.ratio.toFixed(1)}×` : 'new'}</b>
+        <span class="muted">${t('opt.uaLine', { vol: fmtCount(x.volume), unit, oi: fmtCount(x.oi) })}</span>
+        <b class="op-ua-x">${x.ratio != null ? `${x.ratio >= 10 ? Math.round(x.ratio) : fixed(x.ratio, 1)}×` : esc(t('opt.new'))}</b>
       </button>`;
     }).join('');
   }
@@ -419,13 +423,13 @@ export class OptionsPanel {
     const d = this.data;
     if (!foot || !d) return;
     const notes = [];
-    if (d.source === 'yahoo' && !d.stats.quoted) notes.push('No bids or asks right now (US market closed): IV, Greeks and the expected move use last trades');
-    notes.push(`Greeks: Black-Scholes from each contract's IV, ${d.source === 'deribit' ? 'on the expiry\'s forward price' : `${+(d.rate * 100).toFixed(2)}% risk-free rate, no dividends`}`);
-    notes.push(d.source === 'deribit' ? `Prices in USD per ${esc(d.unit)}` : 'Prices per share · contracts of 100 shares');
-    if (d.source === 'yahoo') notes.push('click a contract to open its chart');
-    const time = new Date(d.updated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    if (d.source === 'yahoo' && !d.stats.quoted) notes.push(t('opt.note.noQuotes'));
+    notes.push(d.source === 'deribit' ? t('opt.note.greeksForward') : t('opt.note.greeksRate', { rate: (d.rate * 100).toLocaleString(locale, { maximumFractionDigits: 2 }) }));
+    notes.push(d.source === 'deribit' ? t('opt.note.perUnit', { unit: d.unit }) : t('opt.note.perShare'));
+    if (d.source === 'yahoo') notes.push(t('opt.note.click'));
+    const time = new Date(d.updated).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     foot.innerHTML = `<span>${notes.map(esc).join(' · ')}</span><span class="spacer"></span>
-      <span class="${this.error ? 'down' : ''}">${this.error ? `Couldn't update (${esc(this.error)}), retrying · ` : ''}updated ${time}</span>`;
+      <span class="${this.error ? 'down' : ''}">${esc(this.error ? t('opt.updateFailed', { error: this.error, time }) : t('opt.updated', { time }))}</span>`;
   }
 
   /** Open interest by strike: calls up, puts down, the price and max pain marked. */
@@ -449,7 +453,7 @@ export class OptionsPanel {
     g.font = '11px ' + (css.getPropertyValue('--font') || 'sans-serif');
     if (d.stats.oiMissing) {
       g.fillStyle = muted; g.textAlign = 'center';
-      g.fillText('No open interest reported right now', w / 2, h / 2);
+      g.fillText(t('opt.noOiNow'), w / 2, h / 2);
       this.oiLayout = null;
       return;
     }
@@ -505,9 +509,10 @@ export class OptionsPanel {
     if (xs.mp != null) line(xs.mp, MP);
     if (xs.spot != null) line(xs.spot, text);
     if (xs.spot != null) label(xs.spot, top - 4, `${d.underlying.symbol} ${fmtPrice(d.stats.spot)}`, text, false);
-    if (xs.mp != null) label(xs.mp, bottom - 4, `Max pain ${fmtStrike(mp)}`, MP, true);
-    else if (mpOut < 0) label(0, bottom - 4, `← Max pain ${fmtStrike(mp)}`, MP, true);
-    else if (mpOut > 0) label(w, bottom - 4, `Max pain ${fmtStrike(mp)} →`, MP, true);
+    const mpText = mp == null ? '' : t('opt.maxPainAt', { strike: fmtStrike(mp) });
+    if (xs.mp != null) label(xs.mp, bottom - 4, mpText, MP, true);
+    else if (mpOut < 0) label(0, bottom - 4, `← ${mpText}`, MP, true);
+    else if (mpOut > 0) label(w, bottom - 4, `${mpText} →`, MP, true);
     // Strikes along the bottom.
     g.fillStyle = muted; g.textAlign = 'center';
     const every = Math.max(1, Math.ceil(rows.length / Math.max(1, Math.floor(w / 64))));
@@ -525,23 +530,22 @@ export class OptionsPanel {
     const r = d?.rows[Number(td.closest('tr').dataset.i)];
     const c = td.dataset.side === 'c' ? r?.call : r?.put;
     if (!c) { this.tip.hidden = true; return; }
-    const kind = td.dataset.side === 'c' ? 'Call' : 'Put';
-    const line = (label, v) => `<span>${label}</span><b>${v}</b>`;
-    const traded = c.traded ? new Date(c.traded * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : null;
-    this.tip.innerHTML = `<div class="hm-tip-head"><b>${esc(fmtStrike(r.strike))} ${kind}</b> <span>${esc(c.symbol)}</span></div>
-      <div class="muted">${c.itm ? 'In the money' : 'Out of the money'}${d.source === 'yahoo' ? ' · click to open its chart' : ''}</div>
+    const line = (label, v) => `<span>${esc(label)}</span><b>${v}</b>`;
+    const traded = c.traded ? new Date(c.traded * 1000).toLocaleString(locale, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : null;
+    this.tip.innerHTML = `<div class="hm-tip-head"><b>${esc(t(td.dataset.side === 'c' ? 'opt.callAt' : 'opt.putAt', { strike: fmtStrike(r.strike) }))}</b> <span>${esc(c.symbol)}</span></div>
+      <div class="muted">${esc(c.itm ? t('opt.itm') : t('opt.otm'))}${d.source === 'yahoo' ? ` · ${esc(t('opt.clickToOpen'))}` : ''}</div>
       <div class="hm-tip-grid">${[
-        line('Bid / Ask', `${fmtPrice(c.bid)} / ${fmtPrice(c.ask)}`),
-        line('Mid', fmtPrice(c.mid)),
-        c.mark != null ? line('Mark', fmtPrice(c.mark)) : '',
-        line('Last', `${fmtPrice(c.last)}${c.change != null && d.source === 'deribit' ? ` <small class="${cls(c.change)}">${fmtPct(c.change, 1)}</small>` : ''}`),
-        line('Volume · OI', `${fmtCount(c.volume)} · ${fmtCount(c.oi)}`),
+        line(t('opt.bidAsk'), `${fmtPrice(c.bid)} / ${fmtPrice(c.ask)}`),
+        line(t('opt.mid'), fmtPrice(c.mid)),
+        c.mark != null ? line(t('opt.mark'), fmtPrice(c.mark)) : '',
+        line(t('common.last'), `${fmtPrice(c.last)}${c.change != null && d.source === 'deribit' ? ` <small class="${cls(c.change)}">${fmtPct(c.change, 1)}</small>` : ''}`),
+        line(t('opt.volOi'), `${fmtCount(c.volume)} · ${fmtCount(c.oi)}`),
         line('IV', fmtIv(c.iv)),
-        line('Delta', fmtGreek(c.delta, 3)),
-        line('Gamma', fmtGreek(c.gamma, c.gamma != null && Math.abs(c.gamma) < 0.001 ? 6 : 4)),
-        line('Theta / day', fmtGreek(c.theta, Math.abs(c.theta) >= 100 ? 0 : 3)),
-        line('Vega / 1%', fmtGreek(c.vega, Math.abs(c.vega) >= 100 ? 0 : 3)),
-        traded ? line('Last trade', esc(traded)) : '',
+        line(t('opt.delta'), fmtGreek(c.delta, 3)),
+        line(t('opt.gamma'), fmtGreek(c.gamma, c.gamma != null && Math.abs(c.gamma) < 0.001 ? 6 : 4)),
+        line(t('opt.theta'), fmtGreek(c.theta, Math.abs(c.theta) >= 100 ? 0 : 3)),
+        line(t('opt.vega'), fmtGreek(c.vega, Math.abs(c.vega) >= 100 ? 0 : 3)),
+        traded ? line(t('opt.lastTrade'), esc(traded)) : '',
       ].join('')}</div>`;
     this.placeTip(e);
   }
@@ -554,9 +558,9 @@ export class OptionsPanel {
     const r = L.rows[i];
     if (!r) { this.tip.hidden = true; return; }
     const unit = this.data.source === 'deribit' ? ` ${esc(this.data.unit)}` : '';
-    this.tip.innerHTML = `<div class="hm-tip-head"><b>Strike ${esc(fmtStrike(r.strike))}</b></div>
-      <div class="hm-tip-grid"><span>Call open interest</span><b class="up">${fmtCount(r.call?.oi)}${unit}</b><span>Put open interest</span><b class="down">${fmtCount(r.put?.oi)}${unit}</b>
-      <span>Call volume</span><b>${fmtCount(r.call?.volume)}</b><span>Put volume</span><b>${fmtCount(r.put?.volume)}</b></div>`;
+    this.tip.innerHTML = `<div class="hm-tip-head"><b>${esc(t('opt.strikeHead', { strike: fmtStrike(r.strike) }))}</b></div>
+      <div class="hm-tip-grid"><span>${esc(t('opt.callOi'))}</span><b class="up">${fmtCount(r.call?.oi)}${unit}</b><span>${esc(t('opt.putOi'))}</span><b class="down">${fmtCount(r.put?.oi)}${unit}</b>
+      <span>${esc(t('opt.callVol'))}</span><b>${fmtCount(r.call?.volume)}</b><span>${esc(t('opt.putVol'))}</span><b>${fmtCount(r.put?.volume)}</b></div>`;
     this.placeTip(e);
   }
 

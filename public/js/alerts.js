@@ -2,8 +2,18 @@
 
 import { QuoteStream } from './datafeed.js';
 import { store, uid } from './util.js';
+import { t } from './i18n.js';
 
-export const CONDITIONS = { cross: 'Crossing', up: 'Crossing up', down: 'Crossing down' };
+/** Condition id -> its label (the ids are what alerts store). */
+export const CONDITIONS = { cross: t('alert.cond.cross'), up: t('alert.cond.up'), down: t('alert.cond.down') };
+
+const TEXT = {
+  cross: (v) => t('alert.text.cross', v),
+  up: (v) => t('alert.text.up', v),
+  down: (v) => t('alert.text.down', v),
+};
+/** What an alert waits for, as a sentence: "AAPL crossing up 190.50". */
+export const alertText = (condition, symbol, price) => (TEXT[condition] || TEXT.cross)({ symbol, price });
 
 export class AlertManager {
   /** evaluate: false in pop-out windows, so only the main window fires alerts. */

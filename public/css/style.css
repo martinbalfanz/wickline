@@ -20,6 +20,11 @@
   --mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
   color-scheme: dark;
 }
+/* Chinese and Japanese UI (js/i18n.js sets <html lang>): the system's CJK UI font after the Latin one, so numbers look the same. */
+:root:lang(zh-CN) { --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif; }
+:root:lang(ja) { --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo UI", Meiryo, "Noto Sans CJK JP", sans-serif; }
+:root:lang(zh-TW) { --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Microsoft JhengHei UI", "Microsoft JhengHei", "Noto Sans CJK TC", "Source Han Sans TC", sans-serif; }
+:root:lang(ko) { --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", "Noto Sans KR", sans-serif; }
 
 :root[data-theme="light"] {
   --bg: #FCFBFB;
@@ -383,7 +388,7 @@ body.popout .hide-popout { display: none; }
 .st-empty .st-browse { align-self: center; margin-top: 8px; }
 .st-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 1px; background: var(--border); border-bottom: 1px solid var(--border); flex: none; }
 .st-kpi { display: flex; flex-direction: column; gap: 1px; padding: 8px 12px; background: var(--bg); min-width: 0; }
-.st-kpi span { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.st-kpi span { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .st-kpi b { font-size: 16px; color: var(--text-strong); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .st-kpi b.up { color: var(--up); }
 .st-kpi b.down { color: var(--down); }
@@ -617,7 +622,7 @@ body.popout .hide-popout { display: none; }
 .settings-card .form label { grid-template-columns: 140px 1fr; }
 .set-mode { padding: 10px 12px; border-radius: var(--radius); background: var(--panel-2); color: var(--text); font-size: 12.5px; line-height: 1.5; }
 .set-mode b { color: var(--text-strong); }
-.set-static { display: flex; flex-direction: column; gap: 10px; }
+.set-static, .set-proxy { display: flex; flex-direction: column; gap: 10px; }
 .set-adv summary { cursor: pointer; color: var(--muted); font-size: 12.5px; margin: 4px 0 8px; }
 .set-adv[open] summary { color: var(--text); }
 .set-adv label { margin-bottom: 6px; }
@@ -1067,7 +1072,8 @@ body.popout .hide-popout { display: none; }
   border: 1px solid #16171b; color: #fff; text-align: center; line-height: 1.05;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
 }
-.hm-tile b { font-weight: 700; letter-spacing: 0.01em; }
+.hm-tile b { font-weight: 700; letter-spacing: 0.01em; white-space: nowrap; }
+.hm-tile .hm-name { max-width: 100%; box-sizing: border-box; padding: 0 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.85; }
 .hm-tile small { opacity: 0.92; font-variant-numeric: tabular-nums; }
 .hm-tile:hover { outline: 2px solid #fff; outline-offset: -2px; z-index: 1; }
 .hm-tile.no-chart { cursor: default; }

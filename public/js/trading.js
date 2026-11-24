@@ -6,28 +6,37 @@
 
 import { PaperAccount, PAPER_DEFAULTS, ORDER_TYPES } from './paper.js';
 import { QuoteStream, displayTicker } from './datafeed.js';
-import { $, esc, store } from './util.js';
+import { $, esc, store, fixed } from './util.js';
+import { t, locale } from './i18n.js';
 
 const COLORS = { long: '#4FA3F7', short: '#EC5246', sl: '#EC5246', tp: '#2EBD85', order: '#B07CFF' };
 const REFRESH_MS = 250;
 
 const money = (v, sign = false) => {
   if (v == null || !Number.isFinite(v)) return '—';
-  const s = Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const s = Math.abs(v).toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return `${v < 0 ? '−' : sign && v > 0 ? '+' : ''}${s}`;
 };
-const pct = (v) => (v == null || !Number.isFinite(v) ? '—' : `${v < 0 ? '−' : v > 0 ? '+' : ''}${Math.abs(v).toFixed(2)}%`);
+const pct = (v) => (v == null || !Number.isFinite(v) ? '—' : `${v < 0 ? '−' : v > 0 ? '+' : ''}${fixed(Math.abs(v), 2)}%`);
 const cls = (v) => (v > 0 ? 'up' : v < 0 ? 'down' : '');
 /** 0.5, 12, 1.23456789: up to 8 decimals, no trailing zeros. */
-export const fmtQty = (q) => (Number.isFinite(q) ? String(+Math.abs(q).toFixed(8)) : '—');
+export const fmtQty = (q) => (Number.isFinite(q) ? Math.abs(q).toLocaleString(locale, { maximumFractionDigits: 8, useGrouping: false }) : '—');
 /** A price with sensible decimals for its size. */
 export const fmtPrice = (p) => {
   if (p == null || !Number.isFinite(p)) return '—';
   const d = p >= 1000 ? 2 : p >= 1 ? 2 : p >= 0.01 ? 4 : 8;
-  return p.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+  return p.toLocaleString(locale, { minimumFractionDigits: d, maximumFractionDigits: d });
 };
-const fmtTime = (t) => (t == null ? '—' : new Date(t * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }));
-const REASON = { Market: 'Market', Limit: 'Limit', Stop: 'Stop', Close: 'Closed', 'Stop loss': 'Stop loss', 'Take profit': 'Take profit' };
+const fmtTime = (s) => (s == null ? '—' : new Date(s * 1000).toLocaleString(locale, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }));
+/** Why a trade closed (paper.js's fill reasons, kept in English there), as History shows it. */
+const REASON = {
+  Market: t('trade.reason.market'), Limit: t('trade.reason.limit'), Stop: t('trade.reason.stop'), Close: t('trade.reason.close'),
+  'Stop loss': t('trade.reason.sl'), 'Take profit': t('trade.reason.tp'),
+};
+/** Why a stop or an order filled, in its toast: "Sold 1 AAPL at 190.00 (stop loss)." */
+const WHY = { 'Stop loss': t('trade.why.sl'), 'Take profit': t('trade.why.tp'), Limit: t('trade.why.limit'), Stop: t('trade.why.stop') };
+/** A text's key by side and order type: sideType('trade.line.', 'buy', 'stop') → 'trade.line.buyStop'. */
+const sideType = (base, side, type) => `${base}${side === 'buy' ? 'buy' : 'sell'}${type === 'stop' ? 'Stop' : type === 'market' ? 'Market' : 'Limit'}`;
 
 /** Chart lines for one symbol of an account: the position, its stop loss and take profit, and orders. */
 export function paperLines(acct, symbol) {
@@ -37,14 +46,14 @@ export function paperLines(acct, symbol) {
     const long = p.qty > 0;
     const at = (price) => (price - p.avg) * p.qty;
     lines.push({ id: `pos:${symbol}`, price: p.avg, color: long ? COLORS.long : COLORS.short, style: 'solid', drag: false,
-      title: `${long ? 'Long' : 'Short'} ${fmtQty(p.qty)} · ${money(acct.unrealized(symbol), true)}` });
-    if (p.sl != null) lines.push({ id: `sl:${symbol}`, price: p.sl, color: COLORS.sl, style: 'dashed', drag: true, title: `SL ${money(at(p.sl), true)}` });
-    if (p.tp != null) lines.push({ id: `tp:${symbol}`, price: p.tp, color: COLORS.tp, style: 'dashed', drag: true, title: `TP ${money(at(p.tp), true)}` });
+      title: t(long ? 'trade.line.long' : 'trade.line.short', { qty: fmtQty(p.qty), pnl: money(acct.unrealized(symbol), true) }) });
+    if (p.sl != null) lines.push({ id: `sl:${symbol}`, price: p.sl, color: COLORS.sl, style: 'dashed', drag: true, title: t('trade.line.sl', { pnl: money(at(p.sl), true) }) });
+    if (p.tp != null) lines.push({ id: `tp:${symbol}`, price: p.tp, color: COLORS.tp, style: 'dashed', drag: true, title: t('trade.line.tp', { pnl: money(at(p.tp), true) }) });
   }
   for (const o of acct.orders) {
     if (o.symbol !== symbol) continue;
     lines.push({ id: `ord:${o.id}`, price: o.price, color: COLORS.order, style: 'dashed', drag: true,
-      title: `${o.side === 'buy' ? 'Buy' : 'Sell'} ${o.type} ${fmtQty(o.qty)}` });
+      title: t(sideType('trade.line.', o.side, o.type), { qty: fmtQty(o.qty) }) });
   }
   return lines;
 }
@@ -61,8 +70,8 @@ export class TradingPanel {
     this.content = $('#tr-content');
     this.ticketEl = $('#tr-ticket');
     this.live = new PaperAccount({}, store.get('paper', null));
-    const t = store.get('paperTicket', {});
-    this.ticket = { side: 'buy', type: 'market', qty: 1, price: '', sl: '', tp: '', useSl: false, useTp: false, ...t };
+    const saved = store.get('paperTicket', {});
+    this.ticket = { side: 'buy', type: 'market', qty: 1, price: '', sl: '', tp: '', useSl: false, useTp: false, ...saved };
     this.qtys = store.get('paperQty', {}); // symbol -> the last quantity traded (1 BTC and 1 share are very different)
     this.tab = 'positions';
     this.resetArmed = 0;
@@ -189,7 +198,7 @@ export class TradingPanel {
       view.replayAccount = new PaperAccount({ balance, commission, slippage, leverage });
       view.replayAccount.last[sym] = view.lastBar?.close;
       view.replayAccount.clock = view.replay.clock;
-      this.toast(`Replay: trades now use a practice account (${money(balance)}). Your paper account isn't touched.`);
+      this.toast(t('trade.toast.replayStart', { balance: money(balance) }));
     } else if (event === 'bar' && view.replayAccount) {
       const acct = view.replayAccount;
       const start = view.utcAt(payload.time);
@@ -207,11 +216,11 @@ export class TradingPanel {
         const s = acct.stats();
         const open = Object.keys(acct.positions).length;
         const result = acct.equity - acct.settings.balance;
-        this.toast(`Replay finished: ${s.trades} closed trade${s.trades === 1 ? '' : 's'}${s.trades ? ` (${s.winRate.toFixed(0)}% won)` : ''}`
-          + `${open ? `, ${open} still open` : ''}. Result ${money(result, true)}${open ? ' counting open positions' : ''}.`);
+        const vars = { n: s.trades, win: s.winRate?.toFixed(0), open, result: money(result, true) };
+        this.toast(t(!open ? 'trade.toast.replayDone' : s.trades ? 'trade.toast.replayDoneOpen' : 'trade.toast.replayDoneOnlyOpen', vars));
       }
     } else if (event === 'end') {
-      this.toast('Replay reached the latest candle. Exit the replay to go back to live data.');
+      this.toast(t('trade.toast.replayEnd'));
     } else if (event === 'notice') {
       this.toast(payload);
     }
@@ -266,13 +275,13 @@ export class TradingPanel {
 
   place(view, o) {
     if (!view) return;
-    if (view.replayPick) { this.toast('Pick the replay\'s first candle first.'); return; }
-    if (!view.lastBar || !view.feed) { this.toast('Wait for the chart to load.'); return; }
+    if (view.replayPick) { this.toast(t('trade.toast.pickStart')); return; }
+    if (!view.lastBar || !view.feed) { this.toast(t('trade.toast.waitChart')); return; }
     const acct = this.accountFor(view);
     const res = acct.placeOrder({ ...o, symbol: view.state.symbol }, { price: this.priceOf(view), time: this.timeOf(view) });
     if (!res.ok) { this.toast(res.error); return; }
     if (!res.fills.length) {
-      this.toast(`${o.side === 'buy' ? 'Buy' : 'Sell'} ${o.type} order placed: ${fmtQty(o.qty)} ${displayTicker(view.state.symbol)} at ${fmtPrice(res.order.price)}.`);
+      this.toast(t(sideType('trade.toast.placed.', o.side, o.type), { qty: fmtQty(o.qty), symbol: displayTicker(view.state.symbol), price: fmtPrice(res.order.price) }));
       this.changed(acct);
     } else this.handleFills(acct, res.fills, true);
   }
@@ -291,13 +300,12 @@ export class TradingPanel {
 
   handleFills(acct, fills, quiet = false) {
     for (const f of fills) {
-      if (f.rejected) { this.toast(`Order cancelled: ${f.reason.toLowerCase()} for ${fmtQty(f.order.qty)} ${displayTicker(f.symbol)}.`); continue; }
-      if (quiet && fills.length === 1 && f.reason === 'Market') {
-        this.toast(`${f.side === 'buy' ? 'Bought' : 'Sold'} ${fmtQty(f.qty)} ${displayTicker(f.symbol)} at ${fmtPrice(f.price)}.`);
-        continue;
-      }
-      const why = f.reason === 'Stop loss' || f.reason === 'Take profit' ? ` (${f.reason.toLowerCase()})` : f.reason === 'Limit' || f.reason === 'Stop' ? ` (${f.reason.toLowerCase()} order)` : '';
-      this.toast(`${f.side === 'buy' ? 'Bought' : 'Sold'} ${fmtQty(f.qty)} ${displayTicker(f.symbol)} at ${fmtPrice(f.price)}${why}.`);
+      // paper.js rejects a triggered order for one reason only: not enough buying power.
+      if (f.rejected) { this.toast(t('trade.toast.rejected', { qty: fmtQty(f.order.qty), symbol: displayTicker(f.symbol) })); continue; }
+      const why = WHY[f.reason]; // none for a market order or a close
+      const vars = { qty: fmtQty(f.qty), symbol: displayTicker(f.symbol), price: fmtPrice(f.price), why };
+      if (f.side === 'buy') this.toast(why ? t('trade.toast.boughtWhy', vars) : t('trade.toast.bought', vars));
+      else this.toast(why ? t('trade.toast.soldWhy', vars) : t('trade.toast.sold', vars));
     }
     if (fills.length) this.changed(acct);
     else this.refresh();
@@ -364,10 +372,10 @@ export class TradingPanel {
       const badge = b.querySelector('span');
       if (badge) badge.textContent = c || '';
     });
-    $('#tr-account').innerHTML = `${replay ? '<span class="tr-badge" title="Trades in a replay use a practice account that ends with the replay">Replay practice</span>' : ''}
-      <span>Equity <b>${money(acct.equity)}</b></span>
-      <span>Open P&amp;L <b class="${cls(acct.openPnl)}">${money(acct.openPnl, true)}</b></span>
-      <span>Realized <b class="${cls(acct.realized)}">${money(acct.realized, true)}</b></span>`;
+    $('#tr-account').innerHTML = `${replay ? `<span class="tr-badge" title="${esc(t('trade.badge.replayTip'))}">${esc(t('trade.badge.replay'))}</span>` : ''}
+      <span>${esc(t('trade.equity'))} <b>${money(acct.equity)}</b></span>
+      <span>${esc(t('trade.openPnl'))} <b class="${cls(acct.openPnl)}">${money(acct.openPnl, true)}</b></span>
+      <span>${esc(t('trade.realized'))} <b class="${cls(acct.realized)}">${money(acct.realized, true)}</b></span>`;
     const html = this.tab === 'orders' ? this.ordersHtml(acct)
       : this.tab === 'history' ? this.historyHtml(acct)
         : this.tab === 'account' ? this.accountHtml(acct, replay)
@@ -383,11 +391,11 @@ export class TradingPanel {
       const u = acct.unrealized(sym);
       const long = p.qty > 0;
       const bracket = (k, v) => (v != null
-        ? `${fmtPrice(v)} <button class="tr-x" data-tr="clear-${k}" data-sym="${esc(sym)}" title="Remove">×</button>`
-        : `<button class="tr-add" data-tr="add-${k}" data-sym="${esc(sym)}" title="Add a ${k === 'sl' ? 'stop loss' : 'take profit'} (then drag it on the chart)">+ ${k.toUpperCase()}</button>`);
+        ? `${fmtPrice(v)} <button class="tr-x" data-tr="clear-${k}" data-sym="${esc(sym)}" title="${esc(t('common.remove'))}">×</button>`
+        : `<button class="tr-add" data-tr="add-${k}" data-sym="${esc(sym)}" title="${esc(k === 'sl' ? t('trade.addSlTip') : t('trade.addTpTip'))}">${esc(k === 'sl' ? t('trade.addSl') : t('trade.addTp'))}</button>`);
       return `<tr>
         <td><button class="tr-sym" data-tr="open" data-sym="${esc(sym)}">${esc(displayTicker(sym))}</button></td>
-        <td class="${long ? 'up' : 'down'}">${long ? 'Long' : 'Short'}</td>
+        <td class="${long ? 'up' : 'down'}">${esc(long ? t('common.long') : t('common.short'))}</td>
         <td class="num">${fmtQty(p.qty)}</td>
         <td class="num">${fmtPrice(p.avg)}</td>
         <td class="num">${fmtPrice(last)}</td>
@@ -395,77 +403,77 @@ export class TradingPanel {
         <td class="num ${cls(u)}">${pct(((last - p.avg) / p.avg) * 100 * Math.sign(p.qty))}</td>
         <td class="num">${bracket('sl', p.sl)}</td>
         <td class="num">${bracket('tp', p.tp)}</td>
-        <td class="act"><button class="tb-btn" data-tr="close" data-sym="${esc(sym)}">Close</button></td>
+        <td class="act"><button class="tb-btn" data-tr="close" data-sym="${esc(sym)}">${esc(t('trade.closePos'))}</button></td>
       </tr>`;
     }).join('');
-    if (!rows) return '<div class="st-empty"><b>No open positions</b><span>On the left: pick Buy or Sell, set the quantity, then press the order button at the bottom.<br>Or click Buy or Sell on the chart for an instant market order.</span></div>';
-    return `<table class="tr-table"><thead><tr><th>Symbol</th><th>Side</th><th class="num">Qty</th><th class="num">Avg price</th><th class="num">Last</th>
-      <th class="num">P&amp;L</th><th class="num">%</th><th class="num">Stop loss</th><th class="num">Take profit</th><th class="act">
-      <button class="tb-btn" data-tr="close-all">Close all</button></th></tr></thead><tbody>${rows}</tbody></table>`;
+    if (!rows) return `<div class="st-empty"><b>${esc(t('trade.empty.positions'))}</b><span>${t('trade.empty.positionsHelp')}</span></div>`;
+    return `<table class="tr-table"><thead><tr><th>${esc(t('common.symbol'))}</th><th>${esc(t('trade.col.side'))}</th><th class="num">${esc(t('trade.col.qty'))}</th><th class="num">${esc(t('trade.col.avg'))}</th><th class="num">${esc(t('common.last'))}</th>
+      <th class="num">${esc(t('trade.col.pnl'))}</th><th class="num">%</th><th class="num">${esc(t('trade.sl'))}</th><th class="num">${esc(t('trade.tp'))}</th><th class="act">
+      <button class="tb-btn" data-tr="close-all">${esc(t('trade.closeAll'))}</button></th></tr></thead><tbody>${rows}</tbody></table>`;
   }
 
   ordersHtml(acct) {
     const rows = acct.orders.map((o) => `<tr>
       <td><button class="tr-sym" data-tr="open" data-sym="${esc(o.symbol)}">${esc(displayTicker(o.symbol))}</button></td>
-      <td class="${o.side === 'buy' ? 'up' : 'down'}">${o.side === 'buy' ? 'Buy' : 'Sell'}</td>
-      <td>${ORDER_TYPES[o.type]}</td>
+      <td class="${o.side === 'buy' ? 'up' : 'down'}">${esc(o.side === 'buy' ? t('common.buy') : t('common.sell'))}</td>
+      <td>${esc(ORDER_TYPES[o.type])}</td>
       <td class="num">${fmtQty(o.qty)}</td>
       <td class="num">${fmtPrice(o.price)}</td>
       <td class="num">${fmtPrice(o.sl)}</td>
       <td class="num">${fmtPrice(o.tp)}</td>
       <td class="num">${fmtPrice(acct.last[o.symbol])}</td>
-      <td class="act"><button class="tb-btn" data-tr="cancel" data-id="${esc(o.id)}">Cancel</button></td>
+      <td class="act"><button class="tb-btn" data-tr="cancel" data-id="${esc(o.id)}">${esc(t('trade.cancelOrder'))}</button></td>
     </tr>`).join('');
-    if (!rows) return '<div class="st-empty"><b>No working orders</b><span>Limit and stop orders wait here until the price reaches them. Drag their lines on the chart to move them.</span></div>';
-    return `<table class="tr-table"><thead><tr><th>Symbol</th><th>Side</th><th>Type</th><th class="num">Qty</th><th class="num">Price</th>
-      <th class="num">Stop loss</th><th class="num">Take profit</th><th class="num">Last</th><th class="act">
-      <button class="tb-btn" data-tr="cancel-all">Cancel all</button></th></tr></thead><tbody>${rows}</tbody></table>`;
+    if (!rows) return `<div class="st-empty"><b>${esc(t('trade.empty.orders'))}</b><span>${esc(t('trade.empty.ordersHelp'))}</span></div>`;
+    return `<table class="tr-table"><thead><tr><th>${esc(t('common.symbol'))}</th><th>${esc(t('trade.col.side'))}</th><th>${esc(t('trade.col.type'))}</th><th class="num">${esc(t('trade.col.qty'))}</th><th class="num">${esc(t('common.price'))}</th>
+      <th class="num">${esc(t('trade.sl'))}</th><th class="num">${esc(t('trade.tp'))}</th><th class="num">${esc(t('common.last'))}</th><th class="act">
+      <button class="tb-btn" data-tr="cancel-all">${esc(t('trade.cancelAll'))}</button></th></tr></thead><tbody>${rows}</tbody></table>`;
   }
 
   historyHtml(acct) {
-    const rows = [...acct.trades].reverse().slice(0, 300).map((t) => `<tr>
-      <td>${fmtTime(t.exitTime)}</td>
-      <td><button class="tr-sym" data-tr="open" data-sym="${esc(t.symbol)}">${esc(displayTicker(t.symbol))}</button></td>
-      <td class="${t.side === 'long' ? 'up' : 'down'}">${t.side === 'long' ? 'Long' : 'Short'}</td>
-      <td class="num">${fmtQty(t.qty)}</td>
-      <td class="num">${fmtPrice(t.entry)}</td>
-      <td class="num">${fmtPrice(t.exit)}</td>
-      <td class="num ${cls(t.pnl)}">${money(t.pnl, true)}</td>
-      <td class="num ${cls(t.pnl)}">${pct(t.pnlPct)}</td>
-      <td>${REASON[t.reason] || t.reason}</td>
+    const rows = [...acct.trades].reverse().slice(0, 300).map((x) => `<tr>
+      <td>${fmtTime(x.exitTime)}</td>
+      <td><button class="tr-sym" data-tr="open" data-sym="${esc(x.symbol)}">${esc(displayTicker(x.symbol))}</button></td>
+      <td class="${x.side === 'long' ? 'up' : 'down'}">${esc(x.side === 'long' ? t('common.long') : t('common.short'))}</td>
+      <td class="num">${fmtQty(x.qty)}</td>
+      <td class="num">${fmtPrice(x.entry)}</td>
+      <td class="num">${fmtPrice(x.exit)}</td>
+      <td class="num ${cls(x.pnl)}">${money(x.pnl, true)}</td>
+      <td class="num ${cls(x.pnl)}">${pct(x.pnlPct)}</td>
+      <td>${esc(REASON[x.reason] || x.reason)}</td>
     </tr>`).join('');
-    if (!rows) return '<div class="st-empty"><b>No closed trades yet</b><span>Closed and stopped-out trades are listed here with their profit or loss.</span></div>';
-    return `<table class="tr-table"><thead><tr><th>Closed</th><th>Symbol</th><th>Side</th><th class="num">Qty</th><th class="num">Entry</th>
-      <th class="num">Exit</th><th class="num">P&amp;L</th><th class="num">%</th><th>Exit reason</th></tr></thead><tbody>${rows}</tbody></table>`;
+    if (!rows) return `<div class="st-empty"><b>${esc(t('trade.empty.history'))}</b><span>${esc(t('trade.empty.historyHelp'))}</span></div>`;
+    return `<table class="tr-table"><thead><tr><th>${esc(t('trade.col.closed'))}</th><th>${esc(t('common.symbol'))}</th><th>${esc(t('trade.col.side'))}</th><th class="num">${esc(t('trade.col.qty'))}</th><th class="num">${esc(t('trade.col.entry'))}</th>
+      <th class="num">${esc(t('trade.col.exit'))}</th><th class="num">${esc(t('trade.col.pnl'))}</th><th class="num">%</th><th>${esc(t('trade.col.exitReason'))}</th></tr></thead><tbody>${rows}</tbody></table>`;
   }
 
   accountHtml(acct, replay) {
     const s = acct.stats();
     const st = acct.settings;
-    const cell = (label, value, c = '') => `<div class="tr-stat"><span>${label}</span><b class="${c}">${value}</b></div>`;
+    const cell = (label, value, c = '') => `<div class="tr-stat"><span>${esc(label)}</span><b class="${c}">${value}</b></div>`;
     const ret = ((acct.equity - st.balance) / st.balance) * 100;
     const stats = `<div class="tr-stats">
-      ${cell('Starting balance', money(st.balance))}
-      ${cell('Equity', money(acct.equity))}
-      ${cell('Return', pct(ret), cls(ret))}
-      ${cell('Cash (realized)', money(acct.cash))}
-      ${cell('Open P&amp;L', money(acct.openPnl, true), cls(acct.openPnl))}
-      ${cell('Closed trades', s.trades)}
-      ${cell('Win rate', s.winRate == null ? '—' : `${s.winRate.toFixed(1)}%`)}
-      ${cell('Profit factor', s.profitFactor == null ? '—' : s.profitFactor === Infinity ? '∞' : s.profitFactor.toFixed(2))}
-      ${cell('Avg win / loss', `${money(s.avgWin)} / ${money(s.avgLoss)}`)}
+      ${cell(t('trade.startBalance'), money(st.balance))}
+      ${cell(t('trade.equity'), money(acct.equity))}
+      ${cell(t('trade.return'), pct(ret), cls(ret))}
+      ${cell(t('trade.cash'), money(acct.cash))}
+      ${cell(t('trade.openPnl'), money(acct.openPnl, true), cls(acct.openPnl))}
+      ${cell(t('trade.closedTrades'), s.trades)}
+      ${cell(t('trade.winRate'), s.winRate == null ? '—' : `${fixed(s.winRate, 1)}%`)}
+      ${cell(t('trade.profitFactor'), s.profitFactor == null ? '—' : s.profitFactor === Infinity ? '∞' : fixed(s.profitFactor, 2))}
+      ${cell(t('trade.avgWinLoss'), `${money(s.avgWin)} / ${money(s.avgLoss)}`)}
     </div>`;
-    if (replay) return `${stats}<p class="muted tr-note">This replay's practice account starts with the paper account's settings and ends with the replay.</p>`;
+    if (replay) return `${stats}<p class="muted tr-note">${esc(t('trade.replayNote'))}</p>`;
     const armed = Date.now() - this.resetArmed < 3000;
     return `${stats}<form class="tr-settings">
-      <label><span>Starting balance</span><input name="balance" type="number" min="1" step="any" value="${st.balance}"></label>
-      <label><span>Commission %</span><input name="commission" type="number" min="0" max="5" step="any" value="${st.commission}" title="Of each fill's value"></label>
-      <label><span>Slippage %</span><input name="slippage" type="number" min="0" max="5" step="any" value="${st.slippage}" title="Market and stop orders fill this much worse"></label>
-      <label><span>Leverage</span><input name="leverage" type="number" min="1" max="100" step="any" value="${st.leverage}" title="Positions can total up to equity × leverage"></label>
-      <button class="tb-btn" type="submit">Save settings</button>
-      <button class="tb-btn tr-reset${armed ? ' armed' : ''}" type="button" data-tr="reset">${armed ? 'Click again to reset' : 'Reset account'}</button>
+      <label><span>${esc(t('trade.startBalance'))}</span><input name="balance" type="number" min="1" step="any" value="${st.balance}"></label>
+      <label><span>${esc(t('trade.commission'))}</span><input name="commission" type="number" min="0" max="5" step="any" value="${st.commission}" title="${esc(t('trade.commissionTip'))}"></label>
+      <label><span>${esc(t('trade.slippage'))}</span><input name="slippage" type="number" min="0" max="5" step="any" value="${st.slippage}" title="${esc(t('trade.slippageTip'))}"></label>
+      <label><span>${esc(t('trade.leverage'))}</span><input name="leverage" type="number" min="1" max="100" step="any" value="${st.leverage}" title="${esc(t('trade.leverageTip'))}"></label>
+      <button class="tb-btn" type="submit">${esc(t('trade.saveSettings'))}</button>
+      <button class="tb-btn tr-reset${armed ? ' armed' : ''}" type="button" data-tr="reset">${esc(armed ? t('trade.resetConfirm') : t('trade.reset'))}</button>
     </form>
-    <p class="muted tr-note">Prices and P&amp;L are in each market's own currency. Fills use live prices while Wickline is open; nothing runs in the cloud.</p>`;
+    <p class="muted tr-note">${esc(t('trade.currencyNote'))}</p>`;
   }
 
   saveSettings() {
@@ -479,7 +487,7 @@ export class TradingPanel {
       this.live.cash += next.balance - this.live.settings.balance;
     }
     Object.assign(this.live.settings, next);
-    this.toast('Paper account settings saved.');
+    this.toast(t('trade.toast.settingsSaved'));
     document.activeElement?.blur();
     this.changed(this.live);
   }
@@ -493,7 +501,7 @@ export class TradingPanel {
     const act = b.dataset.tr;
     const at = (s) => ({ price: view?.state.symbol === s ? this.priceOf(view) : undefined, time: this.timeOf(view) });
     if (act === 'open') { this.onPick(sym); return; }
-    if (view?.replayPick && acct !== this.live) { this.toast('Pick the replay\'s first candle first.'); return; }
+    if (view?.replayPick && acct !== this.live) { this.toast(t('trade.toast.pickStart')); return; }
     if (act === 'close') { const r = acct.closePosition(sym, at(sym)); if (!r.ok) this.toast(r.error); else this.handleFills(acct, r.fills); return; }
     if (act === 'close-all') { this.handleFills(acct, acct.closeAll({ time: this.timeOf(view) })); return; }
     if (act === 'cancel') { acct.cancelOrder(b.dataset.id); this.changed(acct); return; }
@@ -512,7 +520,7 @@ export class TradingPanel {
       if (Date.now() - this.resetArmed < 3000) {
         this.resetArmed = 0;
         this.live.reset();
-        this.toast(`Paper account reset to ${money(this.live.settings.balance)}.`);
+        this.toast(t('trade.toast.reset', { balance: money(this.live.settings.balance) }));
         this.changed(this.live);
       } else {
         this.resetArmed = Date.now();
@@ -525,19 +533,19 @@ export class TradingPanel {
   // --- the order ticket --------------------------------------------------------
 
   renderTicket() {
-    const t = this.ticket;
+    const tk = this.ticket;
     this.ticketEl.innerHTML = `
-      <div class="tr-side" role="group" aria-label="Side: choose buy or sell, then place the order with the button at the bottom">
-        <button type="button" data-side="buy" class="${t.side === 'buy' ? 'on' : ''}" aria-pressed="${t.side === 'buy'}">Buy</button>
-        <button type="button" data-side="sell" class="${t.side === 'sell' ? 'on' : ''}" aria-pressed="${t.side === 'sell'}">Sell</button>
+      <div class="tr-side" role="group" aria-label="${esc(t('trade.ticket.sideAria'))}">
+        <button type="button" data-side="buy" class="${tk.side === 'buy' ? 'on' : ''}" aria-pressed="${tk.side === 'buy'}">${esc(t('common.buy'))}</button>
+        <button type="button" data-side="sell" class="${tk.side === 'sell' ? 'on' : ''}" aria-pressed="${tk.side === 'sell'}">${esc(t('common.sell'))}</button>
       </div>
       <div class="tr-sym-line"><b class="tr-tk"></b><span class="tr-px muted"></span></div>
-      <label><span>Type</span><select name="type" class="select">${Object.entries(ORDER_TYPES).map(([k, l]) => `<option value="${k}"${t.type === k ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
-      <label class="tr-price-row"><span>Price</span><input name="price" type="number" step="any" min="0" placeholder="Price"></label>
-      <label><span>Quantity</span><input name="qty" type="number" step="any" min="0" value="${t.qty}"></label>
-      <div class="tr-sizes"><span class="muted tr-value"></span>${[10, 25, 50, 100].map((p) => `<button type="button" data-size="${p}" title="${p}% of equity">${p}%</button>`).join('')}</div>
-      <label class="tr-br"><input type="checkbox" name="useSl"${t.useSl ? ' checked' : ''}><span>Stop loss</span><input name="sl" type="number" step="any" min="0"><small class="tr-risk-sl"></small></label>
-      <label class="tr-br"><input type="checkbox" name="useTp"${t.useTp ? ' checked' : ''}><span>Take profit</span><input name="tp" type="number" step="any" min="0"><small class="tr-risk-tp"></small></label>
+      <label><span>${esc(t('trade.col.type'))}</span><select name="type" class="select">${Object.entries(ORDER_TYPES).map(([k, l]) => `<option value="${k}"${tk.type === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+      <label class="tr-price-row"><span>${esc(t('common.price'))}</span><input name="price" type="number" step="any" min="0" placeholder="${esc(t('common.price'))}"></label>
+      <label><span>${esc(t('trade.qty'))}</span><input name="qty" type="number" step="any" min="0" value="${tk.qty}"></label>
+      <div class="tr-sizes"><span class="muted tr-value"></span>${[10, 25, 50, 100].map((p) => `<button type="button" data-size="${p}" title="${esc(t('trade.ticket.ofEquity', { p }))}">${p}%</button>`).join('')}</div>
+      <label class="tr-br"><input type="checkbox" name="useSl"${tk.useSl ? ' checked' : ''}><span>${esc(t('trade.sl'))}</span><input name="sl" type="number" step="any" min="0"><small class="tr-risk-sl"></small></label>
+      <label class="tr-br"><input type="checkbox" name="useTp"${tk.useTp ? ' checked' : ''}><span>${esc(t('trade.tp'))}</span><input name="tp" type="number" step="any" min="0"><small class="tr-risk-tp"></small></label>
       <div class="tr-place-bar"><button type="submit" class="tr-place"></button></div>`;
     this.ticketKey = null;
     this.syncTicket();
@@ -601,31 +609,31 @@ export class TradingPanel {
   updateTicket() {
     const f = this.ticketEl.elements;
     if (!f?.qty) return;
-    const t = this.ticket;
+    const tk = this.ticket;
     const view = this.view;
     const acct = this.accountFor(view);
     const px = this.priceOf(view);
     const sym = view ? displayTicker(view.state.symbol) : '—';
     this.ticketEl.querySelector('.tr-tk').textContent = sym;
-    this.ticketEl.querySelector('.tr-px').textContent = Number.isFinite(px) ? fmtPrice(px) : 'loading…';
-    this.ticketEl.querySelector('.tr-price-row').hidden = t.type === 'market';
-    f.sl.disabled = !t.useSl;
-    f.tp.disabled = !t.useTp;
-    const qty = Number(t.qty);
-    const entry = t.type === 'market' ? px : Number(t.price);
+    this.ticketEl.querySelector('.tr-px').textContent = Number.isFinite(px) ? fmtPrice(px) : t('trade.loading');
+    this.ticketEl.querySelector('.tr-price-row').hidden = tk.type === 'market';
+    f.sl.disabled = !tk.useSl;
+    f.tp.disabled = !tk.useTp;
+    const qty = Number(tk.qty);
+    const entry = tk.type === 'market' ? px : Number(tk.price);
     const value = qty * entry;
-    this.ticketEl.querySelector('.tr-value').textContent = Number.isFinite(value) && value > 0
-      ? `≈ ${money(value)}${acct.equity > 0 ? ` · ${((value / acct.equity) * 100).toFixed(0)}% of equity` : ''}` : '';
-    const dir = t.side === 'buy' ? 1 : -1;
+    this.ticketEl.querySelector('.tr-value').textContent = !(Number.isFinite(value) && value > 0) ? ''
+      : acct.equity > 0 ? t('trade.ticket.valueOfEquity', { value: money(value), pct: ((value / acct.equity) * 100).toFixed(0) }) : `≈ ${money(value)}`;
+    const dir = tk.side === 'buy' ? 1 : -1;
     const risk = (stop) => (Number(stop) > 0 && Number.isFinite(entry) && qty > 0 ? (Number(stop) - entry) * qty * dir : null);
-    const sl = t.useSl ? risk(t.sl) : null;
-    const tp = t.useTp ? risk(t.tp) : null;
+    const sl = tk.useSl ? risk(tk.sl) : null;
+    const tp = tk.useTp ? risk(tk.tp) : null;
     this.ticketEl.querySelector('.tr-risk-sl').textContent = sl == null ? '' : `${money(sl, true)}${acct.equity ? ` (${pct((sl / acct.equity) * 100)})` : ''}`;
     this.ticketEl.querySelector('.tr-risk-sl').className = `tr-risk-sl ${cls(sl)}`;
-    this.ticketEl.querySelector('.tr-risk-tp').textContent = tp == null ? '' : `${money(tp, true)}${sl && sl < 0 ? ` · ${(tp / -sl).toFixed(1)}R` : ''}`;
+    this.ticketEl.querySelector('.tr-risk-tp').textContent = tp == null ? '' : `${money(tp, true)}${sl && sl < 0 ? ` · ${fixed(tp / -sl, 1)}R` : ''}`;
     this.ticketEl.querySelector('.tr-risk-tp').className = `tr-risk-tp ${cls(tp)}`;
     const btn = this.ticketEl.querySelector('.tr-place');
-    btn.className = `tr-place ${t.side}`;
-    btn.textContent = `${t.side === 'buy' ? 'Buy' : 'Sell'} ${fmtQty(qty) || ''} ${sym} ${t.type === 'market' ? 'at market' : `${t.type} ${fmtPrice(Number(t.price))}`}`;
+    btn.className = `tr-place ${tk.side}`;
+    btn.textContent = t(sideType('trade.ticket.', tk.side, tk.type), { qty: fmtQty(qty) || '', symbol: sym, price: fmtPrice(Number(tk.price)) });
   }
 }

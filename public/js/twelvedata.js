@@ -6,12 +6,13 @@
 
 import { settings } from './env.js';
 import { basePlan, aggregateSessions, sessionStart, guessSessionOpen } from './timeframes.js';
+import { t } from './i18n.js';
 
 const BASE = 'https://api.twelvedata.com';
 
 export class NeedsKeyError extends Error {
   constructor() {
-    super('Stocks, ETFs, forex and indices need a free Twelve Data key on this site (crypto works without one).');
+    super(t('td.needsKey'));
     this.code = 'NEEDS_KEY';
   }
 }
@@ -135,7 +136,7 @@ const precisionFor = (pair, closes) => {
  */
 export async function tdBars(ticker, tf, { before = null, outputsize = 5000, since = null, open = null } = {}) {
   const sym = toTd(ticker);
-  if (!sym) throw new Error(`${ticker} isn't available from Twelve Data. Futures and some indices need the optional server.`);
+  if (!sym) throw new Error(t('td.unavailable', { ticker }));
   // A timeframe Twelve Data doesn't have (10m, 3h) comes from a smaller interval, grouped by
   // session. A short request (the live poll) then still needs the whole current session: from
   // the day's start when the caller knows it, else a day's worth of the small bars.

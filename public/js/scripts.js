@@ -2,6 +2,7 @@
 
 import { uid } from './util.js';
 import { sanitizeResult } from './script-sanitize.js';
+import { t } from './i18n.js';
 
 const KEY = 'wickline.scripts';
 const TIMEOUT_MS = 3000;
@@ -25,11 +26,13 @@ function packBars(bars) {
 }
 
 export class ScriptError extends Error {
-  constructor(message, { line = null, logs = [], restarted = false } = {}) {
+  /** `halted`: the script ran too long and was stopped (the message is in the UI language, so test this, not the text). */
+  constructor(message, { line = null, logs = [], restarted = false, halted = false } = {}) {
     super(message);
     this.line = line;
     this.logs = logs;
     this.restarted = restarted;
+    this.halted = halted;
   }
 }
 
@@ -60,7 +63,7 @@ class ScriptWorker {
       e.preventDefault?.();
       // An error between runs (say, from a timer the script left behind) leaves the worker usable.
       if (!this.pending.size) return;
-      this.restart(new ScriptError(`Script engine error: ${String(e.message || 'unknown').slice(0, 200)}`, { restarted: true }));
+      this.restart(new ScriptError(t('scr.engineError', { msg: String(e.message || 'unknown').slice(0, 200) }), { restarted: true }));
     };
   }
 
@@ -70,9 +73,9 @@ class ScriptWorker {
     const timer = setTimeout(() => {
       if (!this.pending.has(job.id)) return;
       this.pending.delete(job.id);
-      job.reject(new ScriptError(`Stopped: the script ran longer than ${TIMEOUT_MS / 1000} seconds (an endless loop?)`));
+      job.reject(new ScriptError(t('scr.timeout', { n: TIMEOUT_MS / 1000 }), { halted: true }));
       // Other runs of this script waiting on the stopped worker are retried by their charts.
-      this.restart(new ScriptError('Script engine restarted', { restarted: true }));
+      this.restart(new ScriptError(t('scr.restarted'), { restarted: true }));
     }, TIMEOUT_MS);
     this.pending.set(job.id, { ...job, data: null, bars: data.time.length, timer });
     this.worker.postMessage({ id: job.id, code: job.code, data, inputs: job.inputs, ctx: job.ctx }, Object.values(data).map((a) => a.buffer));
@@ -85,12 +88,12 @@ class ScriptWorker {
     clearTimeout(p.timer);
     if (data.ok) {
       let res = null;
-      try { res = sanitizeResult(data.result, { bars: p.bars }); } catch (e) { p.reject(new ScriptError(`Bad script result: ${e.message}`)); }
+      try { res = sanitizeResult(data.result, { bars: p.bars }); } catch (e) { p.reject(new ScriptError(t('scr.badResult', { msg: e.message }))); }
       if (res) p.resolve({ ...res, ms: Number(data.ms) || 0 });
     } else {
       const line = Number.isInteger(data.line) && data.line > 0 ? data.line : null;
       const logs = Array.isArray(data.logs) ? data.logs.slice(0, 200).map((l) => (typeof l === 'string' ? l.slice(0, 1000) : '')) : [];
-      p.reject(new ScriptError(typeof data.error === 'string' ? data.error.slice(0, 500) : 'Script error', { line, logs }));
+      p.reject(new ScriptError(typeof data.error === 'string' ? data.error.slice(0, 500) : t('scr.error'), { line, logs }));
     }
     this.idle();
   }
@@ -114,7 +117,7 @@ class ScriptWorker {
   terminate() {
     clearTimeout(this.idleTimer);
     try { this.worker.terminate(); } catch { /* ignore */ }
-    for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new ScriptError('Script engine restarted', { restarted: true })); }
+    for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new ScriptError(t('scr.restarted'), { restarted: true })); }
     this.pending.clear();
   }
 }
@@ -225,9 +228,11 @@ window.addEventListener('storage', (e) => {
 // Starter templates
 // ---------------------------------------------------------------------------
 
+// `label` is what the New ▾ menu shows (it groups strategies under their own title); `name`, added
+// below, is the full name ("Strategy: …" for strategies). Both are in the UI language; the code isn't.
 export const TEMPLATES = [
   {
-    name: 'Blank indicator',
+    label: t('scr.tpl.blank'),
     code: `// Your indicator. Save with Ctrl+S, put it on the chart with Ctrl+Enter.
 indicator('My indicator', { overlay: true });
 
@@ -237,7 +242,7 @@ plot(ta.sma(close, length), { title: 'SMA', color: '#4FA3F7' });
 `,
   },
   {
-    name: 'EMA crossover signals',
+    label: t('scr.tpl.emaCrossSignals'),
     code: `// Two EMAs with a shaded gap and buy/sell markers where they cross.
 indicator('EMA Cross Signals', { overlay: true });
 
@@ -256,7 +261,7 @@ marker(ta.crossunder(fast, slow), { position: 'above', shape: 'down', color: '#E
 `,
   },
   {
-    name: 'RSI with colored zones',
+    label: t('scr.tpl.rsiZones'),
     code: `// RSI in its own pane; the line turns red when overbought and green when oversold.
 indicator('RSI Zones', { overlay: false, precision: 1 });
 
@@ -275,7 +280,7 @@ fill(upper, lower, { color: 'rgba(126, 87, 194, 0.08)' });
 `,
   },
   {
-    name: 'Volume spikes',
+    label: t('scr.tpl.volumeSpikes'),
     code: `// Marks bars whose volume is far above its recent average.
 indicator('Volume Spikes', { overlay: true });
 
@@ -290,7 +295,7 @@ marker(spike.map((s, i) => s && close[i] < open[i]), { position: 'above', shape:
 `,
   },
   {
-    name: 'MACD histogram (4 colors)',
+    label: t('scr.tpl.macdColors'),
     code: `// MACD with a histogram colored by direction and whether it is growing or fading.
 indicator('MACD Colors', { overlay: false });
 
@@ -309,7 +314,7 @@ hline(0);
 `,
   },
   {
-    name: 'Strategy: EMA cross (long & short)',
+    label: t('scr.tpl.emaCross'),
     code: `// Goes long when the fast EMA crosses above the slow one and short when it crosses below,
 // with a stop loss and a take profit on every trade. Results appear in the Strategy tester.
 strategy('EMA Cross Strategy', { capital: 10000, size: { percent: 100 }, commission: 0.1 });
@@ -330,7 +335,7 @@ strategy.exit({ stopLoss, takeProfit });
 `,
   },
   {
-    name: 'Strategy: RSI mean reversion (long only)',
+    label: t('scr.tpl.rsiMeanReversion'),
     code: `// Buys when RSI climbs back above the oversold level and sells when it reaches the exit level.
 strategy('RSI Mean Reversion', { overlay: false, commission: 0.1 });
 
@@ -350,7 +355,7 @@ strategy.exit({ stopLoss });
 `,
   },
   {
-    name: 'Strategy: breakout with trailing stop',
+    label: t('scr.tpl.breakoutTrailing'),
     code: `// Buys a breakout above the highest high of the last N bars and rides it with a trailing stop.
 strategy('Breakout + Trailing Stop', { commission: 0.1 });
 
@@ -371,7 +376,7 @@ strategy.exit({ trailing: trail });
 `,
   },
   {
-    name: 'Strategy: Supertrend with time stop (onBar)',
+    label: t('scr.tpl.supertrendTimeStop'),
     code: `// Enters when Supertrend turns up and exits when it turns down or after a maximum number of bars.
 // It uses strategy.onBar, which runs once per bar, for logic that depends on the open position.
 strategy('Supertrend + Time Stop', { commission: 0.1 });
@@ -392,7 +397,7 @@ strategy.onBar((i, s) => {
 `,
   },
   {
-    name: 'Strategy: Golden cross (50/200 SMA)',
+    label: t('scr.tpl.goldenCross'),
     code: `// The classic long-term trend signal: be long while the 50-period SMA is above the 200,
 // and step aside when it falls back below.
 strategy('Golden Cross', { commission: 0.1 });
@@ -412,7 +417,7 @@ strategy.close('Long', fast.map((f, i) => f < slow[i]));
 `,
   },
   {
-    name: 'Strategy: MACD cross with trend filter',
+    label: t('scr.tpl.macdTrend'),
     code: `// Trades MACD signal-line crosses, but only in the direction of the long-term trend:
 // longs above the 200 EMA, shorts below it. Every trade has a stop loss and a take profit.
 strategy('MACD + Trend Filter', { commission: 0.1 });
@@ -441,7 +446,7 @@ strategy.exit({ stopLoss, takeProfit });
 `,
   },
   {
-    name: 'Strategy: Bollinger Bands mean reversion',
+    label: t('scr.tpl.bbMeanReversion'),
     code: `// Buys when price closes back above the lower Bollinger Band (a stretched move snapping back)
 // and sells when it reaches the middle band.
 strategy('Bollinger Mean Reversion', { commission: 0.1 });
@@ -462,7 +467,7 @@ strategy.exit({ stopLoss });
 `,
   },
   {
-    name: 'Strategy: Turtle breakout (Donchian)',
+    label: t('scr.tpl.turtle'),
     code: `// The Turtle traders' rules: buy a 20-bar high, sell a 10-bar low,
 // and get out if price closes 2 ATRs below the entry.
 strategy('Turtle Breakout', { commission: 0.1 });
@@ -488,7 +493,7 @@ strategy.onBar((i, s) => {
 `,
   },
   {
-    name: 'Strategy: RSI(2) pullback in an uptrend',
+    label: t('scr.tpl.rsi2Pullback'),
     code: `// A short-term pullback system: when price is above its 200 SMA (an uptrend), buy when the
 // 2-period RSI is deeply oversold, and sell as soon as price closes above its 5 SMA.
 strategy('RSI(2) Pullback', { commission: 0.05 });
@@ -511,7 +516,7 @@ strategy.close('Long', close.map((c, i) => c > exitMa[i]));
 `,
   },
   {
-    name: 'Strategy: Supertrend with ADX filter',
+    label: t('scr.tpl.supertrendAdx'),
     code: `// Follows Supertrend flips both ways, but only opens a trade when ADX says the market is
 // actually trending (above the threshold). A flip the other way closes the trade.
 strategy('Supertrend + ADX', { commission: 0.1 });
@@ -536,7 +541,7 @@ strategy.close('Short', turnedUp);
 `,
   },
   {
-    name: 'Strategy: Parabolic SAR flip',
+    label: t('scr.tpl.psarFlip'),
     code: `// Always in the market: long while price is above the Parabolic SAR, short while it is below.
 strategy('Parabolic SAR Flip', { commission: 0.1 });
 
@@ -553,7 +558,7 @@ strategy.entry('Short', 'short', dir.map((d, i) => d === -1 && dir[i - 1] === 1)
 `,
   },
   {
-    name: 'Strategy: Stochastic pullback',
+    label: t('scr.tpl.stochPullback'),
     code: `// Buys when the Stochastic turns up from oversold while price is above its 200 EMA,
 // and sells when the Stochastic reaches overbought (or on the stop loss).
 strategy('Stochastic Pullback', { overlay: false, commission: 0.1 });
@@ -584,7 +589,7 @@ strategy.exit({ stopLoss });
 `,
   },
   {
-    name: 'Strategy: Bollinger squeeze breakout',
+    label: t('scr.tpl.squeeze'),
     code: `// Volatility comes in waves: when the Bollinger Bands get as narrow as they have been in a
 // while (a squeeze), trade the first close outside the bands, and ride it with a trailing stop.
 strategy('Squeeze Breakout', { commission: 0.1 });
@@ -617,7 +622,7 @@ strategy.exit({ trailing: trail });
 `,
   },
   {
-    name: 'Daily range breakout',
+    label: t('scr.tpl.rangeBreakout'),
     code: `// Highest high and lowest low of the last N bars, with markers on breakouts.
 indicator('Range Breakout', { overlay: true });
 
@@ -638,4 +643,4 @@ if (showMarkers) {
 }
 `,
   },
-];
+].map((tpl) => ({ ...tpl, name: /^\s*strategy\(/m.test(tpl.code) ? t('scr.tpl.strategy', { name: tpl.label }) : tpl.label }));

@@ -2,7 +2,8 @@
 // Running this adds keyless stock data: it relays Yahoo Finance (which blocks direct browser
 // requests from other sites), the live Yahoo price stream, Yahoo screeners and live Nasdaq lists.
 // The app detects it automatically (GET /api/health).
-// Zero dependencies — needs Node.js 22+ (built-in fetch and WebSocket).
+// Needs Node.js 22+ (built-in fetch and WebSocket) and nothing else, unless it goes through a proxy:
+// set WICKLINE_PROXY (or HTTPS_PROXY / ALL_PROXY), which uses the undici package (npm install).
 
 import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
@@ -16,9 +17,10 @@ import { technicals, buildRow, insights } from './lib/screener.mjs';
 import { parseFeed, buildNameIndex, buildStories, rankStories, CRYPTO } from './lib/news.mjs';
 import { parseFomc, shapeEcon, shapeEarnings } from './lib/calendar.mjs';
 import { MARKETS, MARKET_ORDER, FX_FALLBACK, usCountries, quoteCapUsd, shapeIntlEarnings, shapeListings, mergeMarkets } from './lib/markets.mjs';
-import { HEATMAP_MARKETS, heatmapMarket } from './lib/heatmap-markets.mjs';
+import { HEATMAP_MARKETS, heatmapMarket, marketStocks } from './lib/heatmap-markets.mjs';
 import { optionsQuery, optionsBody } from './lib/options.mjs';
 import { communityFile, isCommunityPath } from './lib/community.mjs';
+import { envProxy, onServerProxyChange, setServerProxy } from './lib/proxy.mjs';
 import { parseTf, yahooPlan, aggregateSessions, sessionStart } from './public/js/timeframes.js';
 
 // The app's version (package.json), reported by /api/health for the desktop app's update notice.
@@ -126,7 +128,7 @@ function normalizeChart(json, tfCfg) {
   const m = res.meta || {};
   const ts = res.timestamp || [];
   const q = res.indicators?.quote?.[0] || {};
-  const off = m.gmtoffset || 0; // show times in the exchange's local time, like TradingView
+  const off = m.gmtoffset || 0; // show times in the exchange's local time
 
   let bars = [];
   for (let i = 0; i < ts.length; i++) {
@@ -309,7 +311,8 @@ async function loadUniverse(id) {
 const universe = async (id) => (await loadUniverse(id)).body;
 
 // ---------------------------------------------------------------------------
-// Stock screener (lib/screener.mjs): Yahoo quote data for the largest US stocks, plus
+// Stock screener (lib/screener.mjs): Yahoo quote data for the largest US stocks (or another
+// market's, from the heatmap's lists), plus
 // trend metrics (RSI, momentum, moving-average crosses) from a year of daily closes,
 // computed in the background and kept for a few hours.
 // ---------------------------------------------------------------------------
@@ -357,25 +360,27 @@ async function mapLimit(items, limit, fn) {
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => { while (i < items.length) await fn(items[i++]); }));
 }
 
-let quoteCache = { t: 0, map: new Map(), ok: false };
-async function screenerQuotes(symbols) {
-  if (Date.now() - quoteCache.t < 60000) return quoteCache;
+const quoteCaches = new Map(); // market -> { t, map, ok }
+async function screenerQuotes(market, symbols) {
+  const hit = quoteCaches.get(market);
+  if (hit && Date.now() - hit.t < 60000) return hit;
   const map = new Map();
   await mapLimit(chunks(symbols, 200), 3, async (batch) => {
     try { for (const q of await yahooQuoteBatch(batch)) map.set(q.symbol, q); } catch { /* leave these out */ }
   });
-  if (!map.size && quoteCache.map.size) return quoteCache; // keep the last good data
-  quoteCache = { t: Date.now(), map, ok: map.size > 0 };
-  return quoteCache;
+  if (!map.size && hit?.map.size) return hit; // keep the last good data
+  const entry = { t: Date.now(), map, ok: map.size > 0 };
+  quoteCaches.set(market, entry);
+  return entry;
 }
 
 const techCache = new Map(); // symbol -> { t, tech }
-let techJob = null;
-function refreshTechnicals(symbols) {
-  if (techJob) return;
+const techJobs = new Map(); // market -> its running job (each market's metrics fill in on their own)
+function refreshTechnicals(market, symbols) {
+  if (techJobs.has(market)) return;
   const stale = symbols.filter((sym) => !(techCache.get(sym)?.t > Date.now() - TECH_TTL));
   if (!stale.length) return;
-  techJob = mapLimit(chunks(stale, 20), 2, async (batch) => {
+  techJobs.set(market, mapLimit(chunks(stale, 20), 2, async (batch) => {
     for (const host of YAHOO_HOSTS) {
       try {
         const r = await fetch(`https://${host}/v7/finance/spark?symbols=${encodeURIComponent(batch.join(','))}&range=1y&interval=1d`, {
@@ -389,30 +394,48 @@ function refreshTechnicals(symbols) {
         return;
       } catch { /* try the other host */ }
     }
-  }).finally(() => { techJob = null; });
+  }).finally(() => { techJobs.delete(market); }));
 }
 
-let screenerCache = null;
-async function screener() {
-  if (screenerCache && Date.now() - screenerCache.t < 30000) return screenerCache.body;
-  const { rows: all } = await loadUniverse('us-stocks');
-  const top = all.filter((r) => r.m > 0 && r.p > 0).sort((a, b) => b.m - a.m).slice(0, SCREENER_SIZE);
+/** The screener's markets: 'us' (Nasdaq's full list), or a stock market of the heatmap (its largest companies). */
+const isScreenerMarket = (m) => m === 'us' || (Object.hasOwn(HEATMAP_MARKETS, m) && m !== 'crypto');
+
+const screenerCache = new Map(); // market -> { t, body }
+async function screener(market = 'us') {
+  const hit = screenerCache.get(market);
+  if (hit && Date.now() - hit.t < 30000) return hit.body;
+  let top, money = {};
+  if (market === 'us') {
+    const { rows: all } = await loadUniverse('us-stocks');
+    top = all.filter((r) => r.m > 0 && r.p > 0).sort((a, b) => b.m - a.m).slice(0, SCREENER_SIZE);
+  } else {
+    const list = await marketStocks(market, { getYahooSession, getUsCountries });
+    top = list.rows;
+    // Prices and caps stay in the market's currency; fx (dollars per unit) lets the size filter work in dollars.
+    money = { cur: list.cur, capCur: list.capCur, fx: (await fxRates())[list.capCur] ?? null };
+  }
   const symbols = top.map((r) => r.s);
-  refreshTechnicals(symbols.slice(0, TECH_SIZE));
-  const quotes = await screenerQuotes(symbols);
+  refreshTechnicals(market, symbols.slice(0, TECH_SIZE));
+  const quotes = await screenerQuotes(market, symbols);
   const now = Date.now() / 1000;
-  const rows = top.map((b) => buildRow(b, quotes.map.get(b.s), techCache.get(b.s)?.tech, now));
+  const rows = top.map((b) => {
+    const row = buildRow(b, quotes.map.get(b.s), techCache.get(b.s)?.tech, now);
+    if (market !== 'us' && b.n) row.n = b.n; // the list's full names (Yahoo's short ones abroad are often cut or in capitals)
+    return row;
+  });
   const info = insights(rows);
   for (const r of rows) { delete r.sma50; delete r.sma200; delete r.hi52; delete r.lo52; delete r.hi20; delete r.lo20; }
   const techTotal = Math.min(TECH_SIZE, symbols.length);
   const body = gzipSync(JSON.stringify({
     updated: Date.now(),
+    market,
+    ...money,
     limited: !quotes.ok, // only the basic list data (Yahoo's quote data was unavailable)
     tech: { done: symbols.slice(0, techTotal).filter((sym) => techCache.has(sym)).length, total: techTotal },
     insights: info,
     rows,
   }));
-  screenerCache = { t: Date.now(), body };
+  screenerCache.set(market, { t: Date.now(), body });
   return body;
 }
 
@@ -619,7 +642,9 @@ async function tickerMoves(tickers) {
   const fx = await fxRates();
   const yahoo = (s) => CRYPTO[s]?.quote || s;
   const now = Date.now();
-  const fresh = (s) => (Date.now() - quoteCache.t < 120000 && quoteCache.map.get(s)) || (now - (moveCache.get(s)?.t || 0) < 60000 && moveCache.get(s).q);
+  // A fresh screener quote from any market it has scanned, else a recent one of our own.
+  const screened = (s) => { for (const c of quoteCaches.values()) if (now - c.t < 120000 && c.map.has(s)) return c.map.get(s); return null; };
+  const fresh = (s) => screened(s) || (now - (moveCache.get(s)?.t || 0) < 60000 && moveCache.get(s).q);
   const missing = [...new Set(tickers.map(yahoo))].filter((s) => !fresh(s));
   await mapLimit(chunks(missing, 150), 2, async (batch) => {
     try { for (const q of await yahooQuoteBatch(batch)) moveCache.set(q.symbol, { t: Date.now(), q }); } catch { /* no move data for these */ }
@@ -853,6 +878,13 @@ class YahooStreamer {
     }
   }
 
+  /** Opens the stream again (through a newly set proxy); nothing to do if it isn't open. */
+  restart() {
+    if (!this.ws) return;
+    this.retry = 0;
+    this.ws.close(); // onclose reconnects while anyone is watching
+  }
+
   connect() {
     if (typeof WebSocket === 'undefined') return; // Node < 22: fall back to polling only
     const ws = new WebSocket(YAHOO_STREAM_URL);
@@ -884,6 +916,7 @@ class YahooStreamer {
 }
 
 const streamer = new YahooStreamer();
+onServerProxyChange(() => streamer.restart());
 
 function handleStream(url, req, res) {
   const symbols = new Set((url.searchParams.get('symbols') || '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 100));
@@ -939,7 +972,9 @@ async function handleApi(url, req, res) {
       return sendJson(res, 200, await yahooQuotes(symbols));
     }
     if (url.pathname === '/api/screener') {
-      const body = await screener();
+      const market = p.get('market') || 'us';
+      if (!isScreenerMarket(market)) return sendJson(res, 400, { error: 'Unknown market' });
+      const body = await screener(market);
       res.writeHead(200, { 'Content-Type': MIME['.json'], 'Content-Encoding': 'gzip', 'Cache-Control': 'no-store', ...CORS });
       return res.end(body);
     }
@@ -1046,6 +1081,12 @@ export function startServer({ port = PORT, host = HOST } = {}) {
 
 // `npm start` / `node server.mjs`
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
+  const proxy = envProxy();
+  if (proxy.error) console.warn(`Ignoring the proxy "${proxy.text}": ${proxy.error}`);
+  if (proxy.url) {
+    await setServerProxy(proxy.url);
+    console.log(`Connecting through the proxy ${proxy.url.replace(/\/\/[^@/]*@/, '//')}`);
+  }
   const { port } = await startServer();
   console.log(`Wickline running at http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${port}`);
 }

@@ -1,17 +1,23 @@
 // End-to-end check of the real app in Electron, with live data (needs internet).
 // Run: npm run test:e2e
 // Opens the app with its built-in server in a hidden window and checks charts for several
-// markets, the theme dialog, the Ext button, multi-chart layouts and console errors.
-import { app, BrowserWindow } from 'electron';
+// markets, the theme dialog, the Ext button, multi-chart layouts, the network proxy, the UI languages and console errors.
+import { app, BrowserWindow, ipcMain, session } from 'electron';
 import os from 'node:os';
 import path from 'node:path';
 import { rmSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { startServer } from '../server.mjs';
+import { setupProxy } from '../desktop/proxy.mjs';
+import { startHttpProxy, startSocks5Proxy } from './proxy-servers.mjs';
+import { LANGUAGES } from '../public/js/i18n.js';
 
 // One profile per run, so two runs at once don't share (or wipe) each other's storage.
 const profile = path.join(os.tmpdir(), `wickline-e2e-profile-${process.pid}`);
 rmSync(profile, { recursive: true, force: true });
 app.setPath('userData', profile);
+// English UI whatever the system language (navigator.language follows this); section 10 switches it.
+app.commandLine.appendSwitch('lang', 'en-US');
 
 const CHARTS = [
   ['YAHOO:AAPL', '1D'], ['YAHOO:NVDA', '5m'], ['YAHOO:SPY', '1h'], ['YAHOO:^GSPC', '1W'],
@@ -30,14 +36,20 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 app.whenReady().then(async () => {
   const { server, port } = await startServer({ port: 0, host: '127.0.0.1' });
-  const win = new BrowserWindow({ width: 1400, height: 860, show: false, webPreferences: { backgroundThrottling: false } });
+  // Like the app: the proxy setting (desktop/proxy.mjs) and the preload the page reaches it through.
+  const origin = `http://127.0.0.1:${port}`;
+  await setupProxy({ ses: session.defaultSession, ipcMain, dir: profile, isAppUrl: (u) => { try { return new URL(u).origin === origin; } catch { return false; } } }).ready;
+  const preload = fileURLToPath(new URL('../desktop/preload.cjs', import.meta.url));
+  const win = new BrowserWindow({ width: 1400, height: 860, show: false, webPreferences: { backgroundThrottling: false, preload } });
   const errors = [];
   win.webContents.on('console-message', (e, level, message) => {
     const lvl = e?.level ?? level, msg = String(e?.message ?? message);
     // Dropped network connections (e.g. a live stream closed on navigation) aren't app errors.
     if ((lvl === 'error' || lvl === 3) && !/Failed to load resource|ERR_CONNECTION|ERR_ABORTED/.test(msg)) errors.push(msg.slice(0, 200));
   });
-  const run = (js) => win.webContents.executeJavaScript(js);
+  // A script interrupted by a navigation never answers: fail then, rather than wait forever.
+  const run = (js) => Promise.race([win.webContents.executeJavaScript(js),
+    wait(60000).then(() => { throw new Error(`no answer from the page: ${js.slice(0, 80)}`); })]);
   let page = 0;
   const open = async (sym, tf) => {
     // A new query string forces a fresh page (a different #hash alone wouldn't reload it).
@@ -132,7 +144,7 @@ app.whenReady().then(async () => {
     check('a new symbol opens with its prices in view', view.auto && view.last <= view.top && view.last >= Math.min(view.bot, view.top) - Math.abs(view.top) * 0.5,
       `last ${view.last} scale ${Math.round(view.bot)}..${Math.round(view.top)}`);
 
-    // 5b. Any timeframe (like TradingView): built from each source's own intervals, live too; the
+    // 5b. Any timeframe: built from each source's own intervals, live too; the
     //     ▾ menu with stars; typing a number opens "Change interval".
     // Bar spacing, and bars off their day's grid (midnight UTC for crypto, the day's first bar for stocks).
     const tfBars = (sec) => run(`(() => { const v = window.__wickline.views()[0]; const b = v.bars;
@@ -393,6 +405,19 @@ app.whenReady().then(async () => {
     await wait(3000);
     const scChart = await run(`document.querySelector('.cell .lg-title').innerText`);
     check('clicking a screener row opens that stock', scChart.startsWith(scSym + ' '), `${scSym} -> ${scChart.split('\n')[0]}`);
+    // Another market: Japan's largest stocks, with local codes (7203, not 7203.T) and caps in yen.
+    await run(`(() => { const s = document.querySelector('#screener [data-f="market"]'); s.value = 'JP'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    for (let i = 0; i < 90; i++) { await wait(500); if (await run(`!!document.querySelector('.sc-table tbody tr') && /7203|\\d{4}/.test(document.querySelector('.sc-sym b')?.textContent || '')`)) break; }
+    await run(`document.querySelector('[data-idea="all"]').click()`);
+    await wait(300);
+    const jp = await run(`({ rows: document.querySelectorAll('.sc-table tbody tr').length, codes: [...document.querySelectorAll('.sc-sym b')].slice(0, 5).map((b) => b.textContent),
+      cap: document.querySelector('.sc-table tbody tr')?.children[5].textContent || '', sub: document.querySelector('.sc-sub').textContent })`);
+    check('screener switches to another market (Japan: local codes, caps in yen)', jp.rows > 50 && jp.codes.every((c) => /^\d{4}$/.test(c)) && /¥|JP/.test(jp.cap) && !/US/.test(jp.sub), JSON.stringify(jp));
+    const jpSym = await run(`(() => { const tr = document.querySelector('.sc-table tbody tr[data-row="0"]'); tr.click(); return tr.querySelector('.sc-sym b').textContent; })()`);
+    await wait(3000);
+    const jpChart = await run(`document.querySelector('.cell .lg-title').innerText`);
+    check('a Japanese row opens its Tokyo chart', jpChart.split('\n')[0].startsWith(`${jpSym}.T`), `${jpSym} -> ${jpChart.split('\n')[0]}`);
+    await run(`(() => { const s = document.querySelector('#screener [data-f="market"]'); s.value = 'us'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
     await run(`document.querySelector('#sc-close').click()`);
 
     // 10. Symbol search: one box for every source, and each result says where its data comes from.
@@ -445,7 +470,9 @@ app.whenReady().then(async () => {
     check('headlines are tagged with tickers', nw.chips > 5, `${nw.chips} chips`);
     check('the economic calendar is grouped by day', nw.days > 0, `${nw.days} days`);
     const tk = await run(`(() => { const b = [...document.querySelectorAll('.nw-list .nw-tk')].find((x) => x.dataset.full.startsWith('YAHOO:')); b.click(); return b.dataset.full; })()`);
-    await wait(3000);
+    // The company's name joins the title once the live feed connects (a few seconds on a slow night).
+    const named = JSON.stringify(`${tk.replace('YAHOO:', '')} `);
+    for (let i = 0; i < 30; i++) { await wait(500); if (await run(`document.querySelector('.cell .lg-title').innerText.startsWith(${named})`)) break; }
     const tkChart = await run(`document.querySelector('.cell .lg-title').innerText`);
     check('clicking a ticker opens its chart', tkChart.startsWith(`${tk.replace('YAHOO:', '')} `), `${tk} -> ${tkChart.split('\n')[0]}`);
     await run(`document.querySelector('[data-view="symbol"]').click()`);
@@ -668,7 +695,7 @@ app.whenReady().then(async () => {
 
     check('the header fits without scrolling', await run(`(() => { const t = document.querySelector('.topbar'); return t.scrollWidth <= t.clientWidth; })()`));
     // ...at any width from small laptops up (labels hide a group at a time).
-    const fits = await run(`(async () => { const t = document.querySelector('.topbar'); const bad = [];
+    const headerFits = () => run(`(async () => { const t = document.querySelector('.topbar'); const bad = [];
       for (const w of [1280, 1366, 1500, 1600, 1720, 1800, 1950, 2400]) {
         t.style.width = w + 'px';
         // A hidden test window delivers resize callbacks late, so give it up to 2 seconds.
@@ -677,6 +704,7 @@ app.whenReady().then(async () => {
         if (!fit) bad.push(w);
       }
       t.style.width = ''; return bad; })()`);
+    const fits = await headerFits();
     check('...at every width from 1280 to 2400 px', fits.length === 0, fits.join(', '));
     // Narrower (vertical monitors, half-screen windows, phones): what doesn't fit moves into the "⋯" menu.
     const narrow = await run(`(async () => { const t = document.querySelector('.topbar'); const more = document.querySelector('#more-btn'); const bad = [];
@@ -695,6 +723,86 @@ app.whenReady().then(async () => {
       lm.hidden = true; t.style.width = ''; return { bad, picker }; })()`);
     check('...and narrower, with the rest in the "⋯" menu', narrow.bad.length === 0, narrow.bad.join(', '));
     check('...whose items work like the buttons', narrow.picker);
+
+    // 9. Network proxy (Data sources): the window's exchange connections and the built-in server's
+    // Yahoo requests and stream all go through a local test proxy; the app's own server doesn't.
+    const httpProxy = await startHttpProxy();
+    const socksProxy = await startSocks5Proxy();
+    await open('YAHOO:AAPL', '1D');
+    await run(`document.querySelector('#settings-btn').click()`);
+    await wait(800);
+    const pv = await run(`({ shown: !document.querySelector('#set-proxy').hidden, mode: document.querySelector('#set-proxy-mode').value,
+      server: !document.querySelector('#set-proxy-row').hidden })`);
+    check('Data sources has the network proxy, on "system" at first', pv.shown && pv.mode === 'system' && !pv.server, JSON.stringify(pv));
+    await run(`(() => { const m = document.querySelector('#set-proxy-mode'); m.value = 'manual'; m.dispatchEvent(new Event('change'));
+      document.querySelector('#set-proxy-server').value = '127.0.0.1'; document.querySelector('#settings-form').requestSubmit(); })()`);
+    await wait(800);
+    const refused = await run(`({ open: !document.querySelector('#settings-modal').hidden, row: !document.querySelector('#set-proxy-row').hidden,
+      msg: document.querySelector('#set-status').textContent })`);
+    check('...refuses a proxy without a port, saying why', refused.open && refused.row && /port/.test(refused.msg), refused.msg);
+    // Saving reloads the page: wait for that before going on (navigating meanwhile would race it).
+    const savedReload = new Promise((r) => win.webContents.once('did-finish-load', r));
+    await run(`document.querySelector('#set-proxy-server').value = '127.0.0.1:${httpProxy.port}'; document.querySelector('#settings-form').requestSubmit()`);
+    await Promise.race([savedReload, wait(20000)]);
+    // Symbols not opened before, so nothing comes from a cache.
+    const through = async (proxy, label, symbols) => {
+      const before = proxy.seen.length;
+      const charts = [];
+      for (const [sym, tf] of symbols) {
+        const r = await open(sym, tf);
+        charts.push(r.error ? `${sym}: ${r.error}` : null);
+        await wait(2500); // let the live streams connect
+      }
+      const seen = [...new Set(proxy.seen.slice(before))];
+      const has = (re) => seen.some((h) => re.test(h));
+      check(`charts load through ${label}`, charts.every((c) => !c), charts.filter(Boolean).join(' | '));
+      check(`...the server's Yahoo requests and stream use it`, has(/^query[12]\.finance\.yahoo\.com:443$/) && has(/^streamer\.finance\.yahoo\.com:443$/), seen.join(' '));
+      check(`...and so do the window's exchange requests and streams`, has(/^(data-api\.binance\.vision|api\.binance\.com):443$/)
+        && has(/^(data-stream\.binance\.vision:443|stream\.binance\.com:9443)$/) && has(/^api\.exchange\.coinbase\.com:443$/)
+        && has(/^ws-feed\.exchange\.coinbase\.com:443$/), seen.join(' '));
+      check("...but not the app's own server", !seen.some((h) => h.startsWith('127.0.0.1') || h.startsWith('localhost')), seen.join(' '));
+    };
+    await through(httpProxy, 'an HTTP proxy', [['YAHOO:MSFT', '1D'], ['BINANCE:ETHUSDT', '1m'], ['COINBASE:ETH-USD', '1h']]);
+    const now = await run(`window.wicklineDesktop.getProxy()`);
+    check('...and the dialog says which proxy is in use', now.mode === 'manual' && now.active === httpProxy.url, JSON.stringify(now));
+    const socksSet = await run(`window.wicklineDesktop.setProxy({ mode: 'manual', server: '${socksProxy.url}' })`);
+    check('switching to SOCKS5 takes effect without a restart', socksSet.ok && socksSet.active === socksProxy.url, JSON.stringify(socksSet));
+    await through(socksProxy, 'a SOCKS5 proxy', [['YAHOO:AMZN', '1D'], ['BINANCE:SOLUSDT', '1m'], ['COINBASE:SOL-USD', '1h']]);
+    const off = await run(`window.wicklineDesktop.setProxy({ mode: 'off', server: '' })`);
+    const seenBefore = httpProxy.seen.length + socksProxy.seen.length;
+    const direct = await open('BINANCE:BTCUSDT', '1h');
+    await wait(1500);
+    check('turning the proxy off connects directly again', off.ok && off.active === 'direct' && !direct.error
+      && httpProxy.seen.length + socksProxy.seen.length === seenBefore, direct.error || JSON.stringify(off));
+    await run(`window.wicklineDesktop.setProxy({ mode: 'system', server: '' })`);
+    await httpProxy.close();
+    await socksProxy.close();
+
+    // 10. UI language (Data sources → Language): every other language, then back to the system's (English here).
+    const pickLang = async (id) => {
+      await open('YAHOO:AAPL', '1D');
+      await run(`document.querySelector('#settings-btn').click()`);
+      await wait(500);
+      const reloaded = new Promise((r) => win.webContents.once('did-finish-load', r));
+      await run(`(() => { const s = document.querySelector('#set-lang'); s.value = '${id}'; document.querySelector('#settings-form').requestSubmit(); })()`);
+      await Promise.race([reloaded, wait(20000)]);
+      for (let i = 0; i < 40; i++) { await wait(500); if (await run(`/\\d/.test(document.querySelector('.cell .lg-ohlc')?.innerText || '')`)) break; }
+      return run(`({ lang: document.documentElement.lang, ind: document.querySelector('#ind-btn span').textContent,
+        options: [...document.querySelectorAll('#set-lang option')].map((o) => o.value).join(),
+        status: document.querySelector('#status-text').textContent, legend: document.querySelector('.cell .lg-ohlc')?.innerText.replace(/\\s+/g, ' ').trim() || '' })`);
+    };
+    // Prices in the legend use the language's decimal mark: AAPL's "O348,03 H…" in Spanish and Portuguese.
+    const decimals = (id, legend) => (['es', 'pt-BR'].includes(id) ? /^O[\d.]*\d,\d\d /.test(legend) : /^O[\d,]*\d\.\d\d /.test(legend));
+    const langIds = LANGUAGES.map((x) => x.id);
+    for (const id of langIds.filter((x) => x !== 'en')) {
+      const word = (await import(`../public/js/lang/${id}.js`)).default['app.hdr.ind'];
+      const l = await pickLang(id);
+      check(`the UI switches to ${id}`, l.lang === id && l.ind === word && decimals(id, l.legend) && l.options === ['', ...langIds].join(), JSON.stringify(l));
+      const langFits = await headerFits();
+      check(`...and its header fits at every width from 1280 to 2400 px`, langFits.length === 0, langFits.join(', '));
+    }
+    const back = await pickLang('');
+    check('...and back to the system language (English)', back.lang === 'en' && back.ind === 'Indicators' && decimals('en', back.legend), JSON.stringify(back));
 
     check('no errors in the console', errors.length === 0, errors.slice(0, 3).join(' | '));
   } catch (e) {

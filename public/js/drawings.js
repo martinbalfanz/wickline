@@ -2,27 +2,30 @@
 // Points are stored as { time, price } so drawings survive zooming, scrolling,
 // history loading and chart-type changes. Saved per symbol in localStorage.
 
+import { t } from './i18n.js';
+import { fixed } from './util.js';
+
 const FIB_LEVELS = [
   [0, '#8E8A82'], [0.236, '#EC5246'], [0.382, '#FF9800'], [0.5, '#4CAF50'],
   [0.618, '#34B886'], [0.786, '#00BCD4'], [1, '#8E8A82'],
 ];
 
 export const TOOLS = {
-  cursor: { label: 'Cursor', points: 0 },
-  trend: { label: 'Trend line', points: 2, color: '#4FA3F7' },
-  ray: { label: 'Ray', points: 2, color: '#4FA3F7' },
-  extended: { label: 'Extended line', points: 2, color: '#4FA3F7' },
-  arrow: { label: 'Arrow', points: 2, color: '#EC5246' },
-  hline: { label: 'Horizontal line', points: 1, color: '#FF9800' },
-  hray: { label: 'Horizontal ray', points: 1, color: '#FF9800' },
-  vline: { label: 'Vertical line', points: 1, color: '#8E8A82' },
-  rect: { label: 'Rectangle', points: 2, color: '#9C27B0' },
-  channel: { label: 'Parallel channel', points: 3, color: '#4FA3F7' },
-  text: { label: 'Text', points: 1, color: '#D9D5CD' },
-  fib: { label: 'Fib retracement', points: 2, color: '#8E8A82' },
-  measure: { label: 'Measure', points: 2, color: '#4FA3F7' },
-  long: { label: 'Long position', points: 2, color: '#34B886' },
-  short: { label: 'Short position', points: 2, color: '#EC5246' },
+  cursor: { label: t('draw.tool.cursor'), points: 0 },
+  trend: { label: t('draw.tool.trend'), points: 2, color: '#4FA3F7' },
+  ray: { label: t('draw.tool.ray'), points: 2, color: '#4FA3F7' },
+  extended: { label: t('draw.tool.extended'), points: 2, color: '#4FA3F7' },
+  arrow: { label: t('draw.tool.arrow'), points: 2, color: '#EC5246' },
+  hline: { label: t('draw.tool.hline'), points: 1, color: '#FF9800' },
+  hray: { label: t('draw.tool.hray'), points: 1, color: '#FF9800' },
+  vline: { label: t('draw.tool.vline'), points: 1, color: '#8E8A82' },
+  rect: { label: t('draw.tool.rect'), points: 2, color: '#9C27B0' },
+  channel: { label: t('draw.tool.channel'), points: 3, color: '#4FA3F7' },
+  text: { label: t('draw.tool.text'), points: 1, color: '#D9D5CD' },
+  fib: { label: t('draw.tool.fib'), points: 2, color: '#8E8A82' },
+  measure: { label: t('draw.tool.measure'), points: 2, color: '#4FA3F7' },
+  long: { label: t('draw.tool.long'), points: 2, color: '#34B886' },
+  short: { label: t('draw.tool.short'), points: 2, color: '#EC5246' },
 };
 
 export const DRAW_COLORS = ['#4FA3F7', '#00BCD4', '#34B886', '#FFEB3B', '#FF9800', '#EC5246', '#E040FB', '#D9D5CD'];
@@ -231,7 +234,7 @@ export class DrawingLayer {
     const spec = TOOLS[this.tool];
     if (spec.points === 1) {
       const item = { id: crypto.randomUUID(), type: this.tool, p1: p, p2: { ...p }, color: spec.color };
-      if (this.tool === 'text') item.text = 'Text';
+      if (this.tool === 'text') item.text = t('draw.tool.text');
       this.items.push(item);
       this._changed(true);
       this._finishTool();
@@ -451,8 +454,9 @@ export class DrawingLayer {
         ctx.textBaseline = 'alphabetic';
         ctx.shadowColor = this.theme.bg;
         ctx.shadowBlur = 4;
-        ctx.fillText(d.text || 'Text', x1, y1);
-        d._w = ctx.measureText(d.text || 'Text').width;
+        const text = d.text || t('draw.tool.text');
+        ctx.fillText(text, x1, y1);
+        d._w = ctx.measureText(text).width;
         break;
       }
       default: break;
@@ -536,8 +540,9 @@ export class DrawingLayer {
         const pct = d.p1.price ? (dp / d.p1.price) * 100 : 0;
         const nb = Math.round(this.logicalFromTime(d.p2.time) - this.logicalFromTime(d.p1.time));
         const secs = Math.abs(d.p2.time - d.p1.time);
-        const dur = secs >= 86400 ? `${Math.round(secs / 86400)}d` : secs >= 3600 ? `${Math.round(secs / 3600)}h` : `${Math.round(secs / 60)}m`;
-        this._label(ctx, `${dp >= 0 ? '+' : ''}${this.formatPrice(dp)} (${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%)\n${nb} bars, ${dur}`,
+        const dur = secs >= 86400 ? t('draw.durD', { n: Math.round(secs / 86400) })
+          : secs >= 3600 ? t('draw.durH', { n: Math.round(secs / 3600) }) : t('draw.durM', { n: Math.round(secs / 60) });
+        this._label(ctx, `${dp >= 0 ? '+' : ''}${this.formatPrice(dp)} (${pct >= 0 ? '+' : ''}${fixed(pct, 2)}%)\n${t('draw.measure', { n: nb, dur })}`,
           mx, up ? Math.min(y1, y2) - 22 : Math.max(y1, y2) + 22, col);
         break;
       }
@@ -553,12 +558,12 @@ export class DrawingLayer {
         ctx.lineWidth = 1;
         line(left, y1, left + w, y1);
         const entry = d.p1.price, target = d.p2.price, stop = d.p3.price;
-        const pct = (p) => `${p >= entry ? '+' : ''}${(((p - entry) / entry) * 100).toFixed(2)}%`;
+        const pct = (p) => `${p >= entry ? '+' : ''}${fixed(((p - entry) / entry) * 100, 2)}%`;
         const rr = Math.abs(stop - entry) ? Math.abs(target - entry) / Math.abs(stop - entry) : 0;
         const cx = left + w / 2;
-        this._label(ctx, `Target ${this.formatPrice(target)} (${pct(target)})`, cx, y2 + (y2 < y1 ? -14 : 14), '#34B886');
-        this._label(ctx, `Stop ${this.formatPrice(stop)} (${pct(stop)})`, cx, y3 + (y3 < y1 ? -14 : 14), '#EC5246');
-        this._label(ctx, `${d.type === 'long' ? 'Long' : 'Short'} · R:R ${rr.toFixed(2)}`, cx, y1, '#34373C');
+        this._label(ctx, t('draw.target', { price: this.formatPrice(target), pct: pct(target) }), cx, y2 + (y2 < y1 ? -14 : 14), '#34B886');
+        this._label(ctx, t('draw.stop', { price: this.formatPrice(stop), pct: pct(stop) }), cx, y3 + (y3 < y1 ? -14 : 14), '#EC5246');
+        this._label(ctx, t(d.type === 'long' ? 'draw.longRR' : 'draw.shortRR', { rr: fixed(rr, 2) }), cx, y1, '#34373C');
         break;
       }
       default: break;

@@ -13,4 +13,6 @@
 - Windows: in "Windows protected your PC", click **More info → Run anyway**.
 - Mac: drag Wickline into Applications and open it. When macOS says it can't verify the app, don't click **Move to Trash**: click **Cancel** (or **Done**), then **System Settings → Privacy & Security → Open Anyway** (on macOS 14 and older, right-click the app → **Open** also works). If it ever says the app "is damaged", run `xattr -cr /Applications/Wickline.app` in Terminal.
 
-No account, no API key: stocks, crypto, the screener, the heatmap, news, bar replay and paper trading work right away.
+No account, no API key: stocks, crypto, the screener, the heatmap, options, news, bar replay and paper trading work right away.
+
+**Language:** English, 简体中文, 繁體中文, 日本語, 한국어, Español, Português (Brasil). It follows your system; change it under ⚙ → Language. Where data sources are blocked, set a proxy under ⚙ → Network proxy.

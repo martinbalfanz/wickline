@@ -1,12 +1,13 @@
 import { searchCrypto, searchYahoo, warmSymbolLists, parseSymbol } from './datafeed.js';
 import { isServerMode } from './env.js';
 import { $, esc } from './util.js';
+import { t, lang } from './i18n.js';
 
 const p = (full, ticker, name, exchange, type, category) => ({ full, ticker, name, exchange, type, category });
 const POPULAR = [
   p('BINANCE:BTCUSDT', 'BTCUSDT', 'BTC / USDT', 'Binance', 'Crypto', 'crypto'),
   p('BINANCE:ETHUSDT', 'ETHUSDT', 'ETH / USDT', 'Binance', 'Crypto', 'crypto'),
-  p('BINANCEF:BTCUSDT', 'BTCUSDT.P', 'BTC / USDT perpetual', 'Binance Futures', 'Crypto perpetual', 'crypto'),
+  p('BINANCEF:BTCUSDT', 'BTCUSDT.P', t('feed.perpName', { base: 'BTC', quote: 'USDT' }), 'Binance Futures', 'Crypto perpetual', 'crypto'),
   p('COINBASE:BTC-USD', 'BTC-USD', 'BTC / USD', 'Coinbase', 'Crypto', 'crypto'),
   p('YAHOO:AAPL', 'AAPL', 'Apple Inc.', 'NASDAQ', 'Stock', 'stocks'),
   p('YAHOO:NVDA', 'NVDA', 'NVIDIA Corporation', 'NASDAQ', 'Stock', 'stocks'),
@@ -23,7 +24,23 @@ const POPULAR = [
   p('YAHOO:ES=F', 'ES=F', 'S&P 500 E-mini Futures', 'CME', 'Futures', 'futures'),
 ];
 
-const TITLES = { open: 'Symbol search', add: 'Add to watchlist', compare: 'Compare symbol', alert: 'Symbol for the alert' };
+const TITLES = {
+  open: t('search.title.open'), add: t('search.title.add'), compare: t('search.title.compare'), alert: t('search.title.alert'),
+};
+
+// Instrument types (and the words Index / Forex / Crypto in the exchange column) in the UI language.
+// Display only: rows keep the English type, and English shows it as the source gives it.
+const TYPE_KEYS = {
+  stock: 'stock', equity: 'stock', 'common stock': 'stock', index: 'index', currency: 'currency',
+  'physical currency': 'currency', forex: 'forex', futures: 'futures', future: 'futures', crypto: 'crypto',
+  cryptocurrency: 'crypto', 'digital currency': 'crypto', 'crypto perpetual': 'cryptoPerp', fund: 'fund',
+  'mutual fund': 'mutualFund', mutualfund: 'mutualFund', 'depositary receipt': 'depositary',
+  'preferred stock': 'preferred', bond: 'bond', warrant: 'warrant',
+};
+function typeLabel(word) {
+  const key = lang !== 'en' && TYPE_KEYS[String(word || '').toLowerCase()];
+  return key ? t(`search.type.${key}`) : word;
+}
 
 /** Where a result's data comes from, shown as a badge on its row. */
 function sourceOf(r) {
@@ -129,7 +146,7 @@ export class SymbolSearch {
   render(q) {
     const rows = q ? mergeResults([this.yahoo, this.crypto], q) : POPULAR;
     this.rows = rows;
-    let html = q ? '' : '<div class="sr-section">Popular</div>';
+    let html = q ? '' : `<div class="sr-section">${t('search.popular')}</div>`;
     rows.forEach((r, i) => {
       const src = sourceOf(r);
       // Crypto rows: the exchange is the source. Others: the exchange, then where the data comes from.
@@ -137,11 +154,11 @@ export class SymbolSearch {
       html += `<div class="sr-row" data-i="${i}">
           <span class="sr-ticker">${esc(r.ticker)}</span>
           <span class="sr-name">${esc(r.name)}</span>
-          <span class="sr-type">${esc(r.type)}</span>
-          <span class="sr-src">${exch ? `<span class="sr-exch">${esc(exch)}</span>` : ''}<span class="sr-badge" data-src="${src.key}" title="Data from ${esc(src.label)}">${esc(src.label)}</span></span>
+          <span class="sr-type">${esc(typeLabel(r.type))}</span>
+          <span class="sr-src">${exch ? `<span class="sr-exch">${esc(typeLabel(exch))}</span>` : ''}<span class="sr-badge" data-src="${src.key}" title="${esc(t('search.dataFrom', { source: src.label }))}">${esc(src.label)}</span></span>
         </div>`;
     });
-    if (!rows.length) html = `<div class="sr-empty">${q ? 'Searching…' : 'Type to search.'}</div>`;
+    if (!rows.length) html = `<div class="sr-empty">${q ? t('search.searching') : t('search.typeToSearch')}</div>`;
     this.list.innerHTML = html;
     this.active = 0;
     this.highlight();

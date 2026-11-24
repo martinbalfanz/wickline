@@ -2,12 +2,13 @@
 // Runs the built-in server on this computer — so stocks, ETFs, forex and futures work without
 // any key, using the user's own internet connection — and shows the app in its own window.
 
-import { app, BrowserWindow, Menu, session, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, session, shell } from 'electron';
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startServer } from '../server.mjs';
+import { setupProxy } from './proxy.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ICON = path.join(HERE, '..', 'build', 'icon.png');
@@ -58,7 +59,8 @@ function saveState(win) {
   } catch { /* not important */ }
 }
 
-const webPreferences = { contextIsolation: true, sandbox: true, nodeIntegration: false };
+// The preload gives the page one thing from the app itself: the network proxy setting.
+const webPreferences = { contextIsolation: true, sandbox: true, nodeIntegration: false, preload: path.join(HERE, 'preload.cjs') };
 
 function createMainWindow() {
   const s = loadState();
@@ -193,5 +195,7 @@ app.whenReady().then(async () => {
     allowPermission(permission, requestingOrigin || details?.requestingUrl || contents?.getURL() || '')
   ));
   ses.setDevicePermissionHandler?.(() => false); // no USB, serial or HID devices
+  // Network proxy (Data sources), for places where the data sources are blocked: set before anything connects.
+  await setupProxy({ ses, ipcMain, dir: app.getPath('userData'), isAppUrl }).ready;
   mainWindow = createMainWindow();
 });

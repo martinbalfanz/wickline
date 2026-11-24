@@ -4,6 +4,8 @@
 // divider moves on its own. Positions are fractions (0..1) of the chart area.
 // Pure (no DOM), unit-tested in test/layout.test.mjs.
 
+import { t } from './i18n.js';
+
 const P = null;
 const H = (...c) => ({ dir: 'h', c }); // side by side
 const V = (...c) => ({ dir: 'v', c }); // stacked
@@ -15,26 +17,26 @@ const countPanes = (t) => (t ? t.c.reduce((s, x) => s + countPanes(x), 0) : 1);
 
 // Panes are numbered depth-first, so the ids and chart order of older layouts stay the same.
 export const LAYOUTS = [
-  ['1', '1 chart', P],
-  ['2v', '2 charts, side by side', H(P, P)],
-  ['2h', '2 charts, stacked', V(P, P)],
-  ['3v', '3 charts in columns', H(P, P, P)],
-  ['3h', '3 charts in rows', V(P, P, P)],
-  ['3', '3 charts: 1 big, 2 on the right', H(P, V(P, P))],
-  ['3t', '3 charts: 1 big on top, 2 below', V(P, H(P, P))],
-  ['4', '4 charts, 2 × 2', V(H(P, P), H(P, P))],
-  ['4v', '4 charts in columns', H(P, P, P, P)],
-  ['4l', '4 charts: 1 big, 3 on the right', H(P, V(P, P, P))],
-  ['4t', '4 charts: 1 big on top, 3 below', V(P, H(P, P, P))],
-  ['5', '5 charts: 2 on top, 3 below', V(H(P, P), H(P, P, P))],
-  ['5l', '5 charts: 1 big, 4 on the right', H(P, V(H(P, P), H(P, P)))],
-  ['5v', '5 charts in columns', H(P, P, P, P, P)],
-  ['6', '6 charts, 3 × 2', V(H(P, P, P), H(P, P, P))],
-  ['6h', '6 charts, 2 × 3', V(H(P, P), H(P, P), H(P, P))],
-  ['7', '7 charts: 3 on top, 4 below', V(H(P, P, P), H(P, P, P, P))],
-  ['7l', '7 charts: 1 big, 6 on the right', H(P, V(H(P, P), H(P, P), H(P, P)))],
-  ['8', '8 charts, 4 × 2', V(H(P, P, P, P), H(P, P, P, P))],
-  ['8h', '8 charts, 2 × 4', V(H(P, P), H(P, P), H(P, P), H(P, P))],
+  ['1', t('app.layoutName.1'), P],
+  ['2v', t('app.layoutName.2v'), H(P, P)],
+  ['2h', t('app.layoutName.2h'), V(P, P)],
+  ['3v', t('app.layoutName.3v'), H(P, P, P)],
+  ['3h', t('app.layoutName.3h'), V(P, P, P)],
+  ['3', t('app.layoutName.3'), H(P, V(P, P))],
+  ['3t', t('app.layoutName.3t'), V(P, H(P, P))],
+  ['4', t('app.layoutName.4'), V(H(P, P), H(P, P))],
+  ['4v', t('app.layoutName.4v'), H(P, P, P, P)],
+  ['4l', t('app.layoutName.4l'), H(P, V(P, P, P))],
+  ['4t', t('app.layoutName.4t'), V(P, H(P, P, P))],
+  ['5', t('app.layoutName.5'), V(H(P, P), H(P, P, P))],
+  ['5l', t('app.layoutName.5l'), H(P, V(H(P, P), H(P, P)))],
+  ['5v', t('app.layoutName.5v'), H(P, P, P, P, P)],
+  ['6', t('app.layoutName.6'), V(H(P, P, P), H(P, P, P))],
+  ['6h', t('app.layoutName.6h'), V(H(P, P), H(P, P), H(P, P))],
+  ['7', t('app.layoutName.7'), V(H(P, P, P), H(P, P, P, P))],
+  ['7l', t('app.layoutName.7l'), H(P, V(H(P, P), H(P, P), H(P, P)))],
+  ['8', t('app.layoutName.8'), V(H(P, P, P, P), H(P, P, P, P))],
+  ['8h', t('app.layoutName.8h'), V(H(P, P), H(P, P), H(P, P), H(P, P))],
 ].map(([id, title, tree]) => ({ id, title, tree, n: countPanes(tree) }));
 
 /** The layout with this id, or the single chart for an unknown one. */

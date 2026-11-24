@@ -1,7 +1,8 @@
 // A live-updating list of symbols with last price and change (used by the watchlist and Markets).
 
 import { QuoteStream, displayTicker, sourceName } from './datafeed.js';
-import { esc, formatNumber, smartDecimals } from './util.js';
+import { esc, formatNumber, smartDecimals, fixed } from './util.js';
+import { t } from './i18n.js';
 
 const ICON_STAR = '<svg viewBox="0 0 24 24" width="15" height="15"><path d="M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.8l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z" fill="currentColor"/></svg>';
 
@@ -52,9 +53,9 @@ export class QuoteList {
         <span class="wl-sym"><b>${esc(displayTicker(it.full))}</b><small>${esc(it.name || sourceName(it.full))}</small></span>
         <span class="wl-price">—</span>
         <span class="wl-chg">—</span>
-        ${onRemove ? '<button class="wl-del" title="Remove" aria-label="Remove">×</button>' : ''}
-        ${onStar ? `<button class="wl-star" title="Add to / remove from watchlist" aria-label="Toggle watchlist">${ICON_STAR}</button>` : ''}
-      </div>`).join('') || `<div class="wl-empty">${esc(this.opts.empty || 'Nothing here.')}</div>`;
+        ${onRemove ? `<button class="wl-del" title="${t('common.remove')}" aria-label="${t('common.remove')}">×</button>` : ''}
+        ${onStar ? `<button class="wl-star" title="${t('mk.watchToggleTitle')}" aria-label="${t('mk.watchToggleAria')}">${ICON_STAR}</button>` : ''}
+      </div>`).join('') || `<div class="wl-empty">${esc(this.opts.empty || t('mk.nothingHere'))}</div>`;
     for (const [full, q] of this.quotes) this.paint(full, q, false);
     this.refreshStars();
   }
@@ -81,7 +82,7 @@ export class QuoteList {
       chg.textContent = '—';
       chg.className = 'wl-chg';
     } else {
-      chg.textContent = `${q.change >= 0 ? '+' : ''}${q.change.toFixed(2)}%`;
+      chg.textContent = `${q.change >= 0 ? '+' : ''}${fixed(q.change, 2)}%`;
       chg.className = `wl-chg ${q.change >= 0 ? 'up' : 'down'}`;
     }
     if (flash) {

@@ -1,4 +1,4 @@
-// Timeframe controls, like TradingView's:
+// Timeframe controls:
 //  - TimeframeBar: the header's favourite timeframes (plus the chart's own when it isn't one of
 //    them) and a ▾ menu listing the common ones by group, each with a star that adds it to the
 //    header or removes it, and a box for any other (7, 90, 5h).
@@ -8,11 +8,12 @@
 
 import { TF_GROUPS, parseTf, tfById } from './timeframes.js';
 import { esc, store } from './util.js';
+import { t } from './i18n.js';
 
 const DEFAULT_FAVORITES = ['1m', '5m', '15m', '1h', '4h', '1D', '1W'];
 const STAR = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.8l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z" fill="currentColor"/></svg>';
 const CHEVRON = '<svg viewBox="0 0 10 6" width="10" height="6" aria-hidden="true"><path d="M1 1l4 4 4-4" stroke="currentColor" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-const HINT = 'Minutes (45), or 4h, D, W, M';
+const HINT = t('tf.hint');
 
 const bySec = (a, b) => tfById(a).sec - tfById(b).sec;
 
@@ -81,12 +82,12 @@ export class TimeframeBar {
       this.shown = key;
       const btn = (id, isExtra) => {
         const tf = tfById(id);
-        const title = isExtra ? `${tf.long} (star it in the ▾ menu to keep it here)` : tf.long;
+        const title = isExtra ? t('tf.extraTitle', { tf: tf.long }) : tf.long;
         return `<button class="tf${isExtra ? ' tf-extra' : ''}" data-tf="${esc(id)}" title="${esc(title)}">${esc(tf.label)}</button>`;
       };
       this.group.innerHTML = favs.map((id) => btn(id, false)).join('') + (extra ? btn(extra, true) : '')
-        + `<button class="tf tf-more${this.menu.hidden ? '' : ' open'}" data-tf-menu title="More timeframes (or type a number on the chart, e.g. 45, then Enter)"
-            aria-label="More timeframes" aria-haspopup="menu">${CHEVRON}</button>`;
+        + `<button class="tf tf-more${this.menu.hidden ? '' : ' open'}" data-tf-menu title="${t('tf.moreTitle')}"
+            aria-label="${t('tf.moreAria')}" aria-haspopup="menu">${CHEVRON}</button>`;
     }
     this.group.querySelectorAll('[data-tf]').forEach((b) => b.classList.toggle('on', b.dataset.tf === active));
     if (!this.menu.hidden) this.renderMenu();
@@ -126,16 +127,16 @@ export class TimeframeBar {
     const common = new Set(TF_GROUPS.flatMap((g) => g.ids));
     // Favourites and the active timeframe that aren't in the lists get their own column.
     const custom = [...new Set([...favs, active].filter((id) => id && !common.has(id)))].sort(bySec);
-    const groups = custom.length ? [...TF_GROUPS, { title: 'Custom', ids: custom }] : TF_GROUPS;
+    const groups = custom.length ? [...TF_GROUPS, { title: t('tf.group.custom'), ids: custom }] : TF_GROUPS;
     const row = (id) => {
       const tf = tfById(id), fav = favs.has(id);
       return `<div class="tf-row${id === active ? ' on' : ''}" data-pick="${id}" role="button" tabindex="-1"><span>${esc(tf.long)}</span>
-        <button class="tf-star${fav ? ' on' : ''}" data-star="${id}" title="${fav ? 'Remove from' : 'Add to'} the header" aria-label="${fav ? 'Remove' : 'Add'} ${esc(tf.long)} ${fav ? 'from' : 'to'} the header">${STAR}</button></div>`;
+        <button class="tf-star${fav ? ' on' : ''}" data-star="${id}" title="${t(fav ? 'tf.starRemoveTitle' : 'tf.starAddTitle')}" aria-label="${t(fav ? 'tf.starRemoveAria' : 'tf.starAddAria', { tf: esc(tf.long) })}">${STAR}</button></div>`;
     };
     const value = this.menu.querySelector('[data-tf-custom]')?.value || '';
-    this.menu.innerHTML = `<div class="tf-cols">${groups.map((g) => `<div class="tf-col"><div class="menu-title">${g.title}</div>${g.ids.map(row).join('')}</div>`).join('')}</div>
+    this.menu.innerHTML = `<div class="tf-cols">${groups.map((g) => `<div class="tf-col"><div class="menu-title">${esc(g.title)}</div>${g.ids.map(row).join('')}</div>`).join('')}</div>
       <div class="menu-sep"></div>
-      <div class="tf-custom"><input data-tf-custom value="${esc(value)}" placeholder="Any other: 7, 90, 5h…" aria-label="Any timeframe" autocomplete="off" spellcheck="false">
+      <div class="tf-custom"><input data-tf-custom value="${esc(value)}" placeholder="${t('tf.customPlaceholder')}" aria-label="${t('tf.customAria')}" autocomplete="off" spellcheck="false">
         <span class="tf-note"></span></div>`;
     this.renderNote();
   }
@@ -146,7 +147,7 @@ export class TimeframeBar {
     if (!input || !note) return;
     const text = input.value.trim();
     const tf = parseTf(text);
-    note.textContent = tf ? `${tf.long} · Enter` : text && tried ? HINT : 'Tip: type it on the chart';
+    note.textContent = tf ? `${tf.long} · Enter` : text && tried ? HINT : t('tf.tip');
     note.classList.toggle('bad', !tf && !!text && tried);
   }
 }
@@ -161,9 +162,9 @@ export class IntervalBox {
     this.el.className = 'ivl-box';
     this.el.hidden = true;
     this.el.setAttribute('role', 'dialog');
-    this.el.setAttribute('aria-label', 'Change interval');
-    this.el.innerHTML = `<div class="ivl-title">Change interval</div>
-      <input class="ivl-input" autocomplete="off" spellcheck="false" aria-label="Interval">
+    this.el.setAttribute('aria-label', t('tf.changeInterval'));
+    this.el.innerHTML = `<div class="ivl-title">${t('tf.changeInterval')}</div>
+      <input class="ivl-input" autocomplete="off" spellcheck="false" aria-label="${t('tf.interval')}">
       <div class="ivl-meaning" aria-live="polite"></div>
       <button type="button" class="ivl-search"></button>`;
     document.body.append(this.el);
@@ -198,11 +199,11 @@ export class IntervalBox {
     this.tf = parseTf(text);
     const tf = this.tf;
     this.meaning.innerHTML = tf ? `→ <b>${esc(tf.long)}</b><kbd>Enter</kbd>`
-      : text ? `Not a timeframe. ${HINT}.` : HINT;
+      : text ? esc(t('tf.notTf', { hint: HINT })) : esc(HINT);
     this.meaning.classList.toggle('bad', !tf && !!text);
     this.searchBtn.hidden = !text;
     this.searchBtn.classList.toggle('primary', !tf);
-    this.searchBtn.innerHTML = `Search symbols for “${esc(text)}”<kbd>${tf ? 'Tab' : 'Enter'}</kbd>`;
+    this.searchBtn.innerHTML = `${t('tf.searchFor', { text: esc(text) })}<kbd>${tf ? 'Tab' : 'Enter'}</kbd>`;
   }
 
   onKey(e) {

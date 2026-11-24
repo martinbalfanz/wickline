@@ -4,10 +4,11 @@
 import { store, withAlpha } from './util.js';
 import { setChartPalette } from './chart-view.js';
 import { setTrendColors } from './indicators.js';
+import { t } from './i18n.js';
 
 export const PRESETS = {
   crimson: {
-    name: 'Crimson',
+    name: t('theme.preset.crimson'),
     dark: {
       accent: '#E5484D', bg: '#0F0F11', panel: '#17171A', border: '#26262B', text: '#E4E1E1', muted: '#8D898B',
       chartBg: '#0F0F11', grid: '#1B1B1F', scaleText: '#A8A4A6', crosshair: '#77737A', up: '#2EBD85', down: '#F6465D',
@@ -18,7 +19,7 @@ export const PRESETS = {
     },
   },
   ember: {
-    name: 'Ember',
+    name: t('theme.preset.ember'),
     dark: {
       accent: '#F2A33A', bg: '#0F1012', panel: '#16181B', border: '#24272B', text: '#D9D5CD', muted: '#8E8A82',
       chartBg: '#0F1012', grid: '#1A1C1F', scaleText: '#A9A49B', crosshair: '#7A766F', up: '#34B886', down: '#EC5246',
@@ -29,7 +30,7 @@ export const PRESETS = {
     },
   },
   dusk: {
-    name: 'Dusk',
+    name: t('theme.preset.dusk'),
     dark: {
       accent: '#9D8CFB', bg: '#100F1A', panel: '#171627', border: '#26243C', text: '#E8E6F5', muted: '#8B88A8',
       chartBg: '#100F1A', grid: '#1A1929', scaleText: '#ABA8C4', crosshair: '#77739A', up: '#2DD4BF', down: '#FB7185',
@@ -40,7 +41,7 @@ export const PRESETS = {
     },
   },
   signal: {
-    name: 'Signal',
+    name: t('theme.preset.signal'),
     dark: {
       accent: '#B5F23D', bg: '#0A0C0B', panel: '#111412', border: '#202622', text: '#E3EAE4', muted: '#7E8A81',
       chartBg: '#0A0C0B', grid: '#141815', scaleText: '#A3AEA6', crosshair: '#6E7A71', up: '#34D399', down: '#F43F5E',
@@ -51,7 +52,7 @@ export const PRESETS = {
     },
   },
   ink: {
-    name: 'Ink',
+    name: t('theme.preset.ink'),
     dark: {
       accent: '#FF6B4A', bg: '#111111', panel: '#181818', border: '#2A2A2A', text: '#EDEDED', muted: '#8F8F8F',
       chartBg: '#111111', grid: '#1B1B1B', scaleText: '#AAAAAA', crosshair: '#777777', up: '#EDEDED', down: '#FF6B4A',
@@ -66,21 +67,21 @@ export const DEFAULT_PRESET = 'crimson';
 
 /** Every color the user can pick, in the order the Appearance dialog shows them. */
 export const FIELDS = [
-  { group: 'Interface', key: 'accent', label: 'Accent' },
-  { group: 'Interface', key: 'bg', label: 'Background' },
-  { group: 'Interface', key: 'panel', label: 'Panels and toolbars' },
-  { group: 'Interface', key: 'border', label: 'Borders' },
-  { group: 'Interface', key: 'text', label: 'Text' },
-  { group: 'Interface', key: 'muted', label: 'Secondary text' },
-  { group: 'Chart', key: 'chartBg', label: 'Chart background' },
-  { group: 'Chart', key: 'grid', label: 'Grid lines' },
-  { group: 'Chart', key: 'scaleText', label: 'Price and time scales' },
-  { group: 'Chart', key: 'crosshair', label: 'Crosshair' },
-  { group: 'Candles', key: 'up', label: 'Up candles' },
-  { group: 'Candles', key: 'down', label: 'Down candles' },
-  { group: 'Candles', key: 'wickUp', label: 'Up wicks' },
-  { group: 'Candles', key: 'wickDown', label: 'Down wicks' },
-  { group: 'Candles', key: 'line', label: 'Line and area charts' },
+  { group: t('theme.group.interface'), key: 'accent', label: t('theme.field.accent') },
+  { group: t('theme.group.interface'), key: 'bg', label: t('theme.field.bg') },
+  { group: t('theme.group.interface'), key: 'panel', label: t('theme.field.panel') },
+  { group: t('theme.group.interface'), key: 'border', label: t('theme.field.border') },
+  { group: t('theme.group.interface'), key: 'text', label: t('theme.field.text') },
+  { group: t('theme.group.interface'), key: 'muted', label: t('theme.field.muted') },
+  { group: t('theme.group.chart'), key: 'chartBg', label: t('theme.field.chartBg') },
+  { group: t('theme.group.chart'), key: 'grid', label: t('theme.field.grid') },
+  { group: t('theme.group.chart'), key: 'scaleText', label: t('theme.field.scaleText') },
+  { group: t('theme.group.chart'), key: 'crosshair', label: t('theme.field.crosshair') },
+  { group: t('theme.group.candles'), key: 'up', label: t('theme.field.up') },
+  { group: t('theme.group.candles'), key: 'down', label: t('theme.field.down') },
+  { group: t('theme.group.candles'), key: 'wickUp', label: t('theme.field.wickUp') },
+  { group: t('theme.group.candles'), key: 'wickDown', label: t('theme.field.wickDown') },
+  { group: t('theme.group.candles'), key: 'line', label: t('theme.field.line') },
 ];
 
 // --- color math --------------------------------------------------------------------------

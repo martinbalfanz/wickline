@@ -6,31 +6,60 @@
 // and test/heatmap-markets.test.mjs.
 
 import { apiUrl, dataMode } from './env.js';
-import { $, esc, store } from './util.js';
+import { $, esc, store, fixed } from './util.js';
+import { t, locale } from './i18n.js';
 
-/** Periods: the row field, and the change that gets the strongest colour. */
+/**
+ * Periods: the row field, its button, its name, and the change that gets the strongest colour.
+ * The buttons keep the short Latin labels in every language (the toolbar is tight); the name is the tooltip.
+ */
 export const PERIODS = [
-  ['c', '1D', 'Today', 3], ['r1w', '1W', 'This week', 6], ['r1m', '1M', 'This month', 10],
-  ['r3m', '3M', '3 months', 20], ['y1', '1Y', '1 year', 40],
+  ['c', '1D', t('hm.period.today'), 3], ['r1w', '1W', t('hm.period.week'), 6], ['r1m', '1M', t('hm.period.month'), 10],
+  ['r3m', '3M', t('hm.period.3months'), 20], ['y1', '1Y', t('hm.period.year'), 40],
 ];
 // Crypto moves more: the same colours stand for twice the change, and changes are rolling.
 const CRYPTO_SCALE = 2;
-const CRYPTO_TITLES = { c: 'Last 24 hours', r1w: 'Last 7 days', r1m: 'Last 30 days', r3m: 'Last 90 days', y1: 'Last 12 months' };
+const CRYPTO_TITLES = {
+  c: t('hm.crypto.24h'), r1w: t('hm.crypto.7d'), r1m: t('hm.crypto.30d'), r3m: t('hm.crypto.90d'), y1: t('hm.crypto.12m'),
+};
 
 /** Markets: id (for /api/heatmap; 'us' is the Screener's scan) and name. */
 export const MARKETS = [
-  ['us', 'United States'], ['GB', 'United Kingdom'], ['DE', 'Germany'], ['FR', 'France'], ['NL', 'Netherlands'],
-  ['IT', 'Italy'], ['ES', 'Spain'], ['CH', 'Switzerland'], ['SE', 'Sweden'], ['JP', 'Japan'], ['CN', 'China'],
-  ['HK', 'Hong Kong'], ['KR', 'South Korea'], ['TW', 'Taiwan'], ['IN', 'India'], ['CA', 'Canada'], ['AU', 'Australia'],
-  ['BR', 'Brazil'], ['crypto', 'Crypto'],
+  ['us', t('hm.mkt.us')], ['GB', t('hm.mkt.GB')], ['DE', t('hm.mkt.DE')], ['FR', t('hm.mkt.FR')], ['NL', t('hm.mkt.NL')],
+  ['IT', t('hm.mkt.IT')], ['ES', t('hm.mkt.ES')], ['CH', t('hm.mkt.CH')], ['SE', t('hm.mkt.SE')], ['JP', t('hm.mkt.JP')], ['CN', t('hm.mkt.CN')],
+  ['HK', t('hm.mkt.HK')], ['KR', t('hm.mkt.KR')], ['TW', t('hm.mkt.TW')], ['IN', t('hm.mkt.IN')], ['CA', t('hm.mkt.CA')], ['AU', t('hm.mkt.AU')],
+  ['BR', t('hm.mkt.BR')], ['crypto', t('hm.mkt.crypto')],
 ];
 const marketName = (id) => MARKETS.find(([k]) => k === id)?.[1] || id;
 
+// Group names come from the data in English (Nasdaq's and Yahoo's sectors, the crypto categories
+// and rank tiers of lib/heatmap-markets.mjs) and stay the ids; these are their display names.
+const GROUP_NAMES = {
+  Technology: t('hm.sec.technology'), 'Financial Services': t('hm.sec.financialServices'), Finance: t('hm.sec.finance'),
+  Healthcare: t('hm.sec.healthcare'), 'Health Care': t('hm.sec.healthCare'), 'Consumer Cyclical': t('hm.sec.consumerCyclical'),
+  'Consumer Discretionary': t('hm.sec.consumerDiscretionary'), 'Consumer Defensive': t('hm.sec.consumerDefensive'),
+  'Consumer Staples': t('hm.sec.consumerStaples'), Industrials: t('hm.sec.industrials'),
+  'Communication Services': t('hm.sec.communication'), Telecommunications: t('hm.sec.telecom'), Energy: t('hm.sec.energy'),
+  'Basic Materials': t('hm.sec.materials'), 'Real Estate': t('hm.sec.realEstate'), Utilities: t('hm.sec.utilities'),
+  Miscellaneous: t('hm.sec.misc'), Other: t('hm.sec.other'),
+  'Exchange tokens': t('hm.sec.exchangeTokens'), 'Layer 1 & 2': t('hm.sec.layer12'), Payments: t('hm.sec.payments'),
+  Infrastructure: t('hm.sec.infrastructure'), Meme: t('hm.sec.meme'), 'Real-world assets': t('hm.sec.rwa'),
+  'Gaming & NFT': t('hm.sec.gaming'), 'Top 10': t('hm.top', { n: 10 }),
+};
+/** A sector, category or tier name from the data, in the UI language (the screener and Markets panel use it too). */
+export const groupName = (name) => GROUP_NAMES[name] || name;
+
+// What the groups are called: sectors, or (crypto) categories or rank tiers.
+const GROUP_TEXT = {
+  sector: { all: t('hm.allSectors'), back: t('hm.backSector'), hint: t('hm.hintSector') },
+  category: { all: t('hm.allCategories'), back: t('hm.backCategory'), hint: t('hm.hintCategory') },
+  group: { all: t('hm.allGroups'), back: t('hm.backGroup'), hint: t('hm.hintGroup') },
+};
+
 /** How many tiles each kind of market offers. */
 export function sizesFor(market) {
-  if (market === 'us') return [[100, 'Top 100'], [250, 'Top 250'], [500, 'Top 500'], [1000, 'Top 1000']];
-  if (market === 'crypto') return [[50, 'Top 50'], [100, 'Top 100'], [250, 'Top 250']];
-  return [[50, 'Top 50'], [100, 'Top 100'], [250, 'Top 250'], [500, 'Top 500']];
+  const n = market === 'us' ? [100, 250, 500, 1000] : market === 'crypto' ? [50, 100, 250] : [50, 100, 250, 500];
+  return n.map((v) => [v, t('hm.top', { n: v })]);
 }
 
 /** The largest of these sizes that's at most `top` (else the smallest), so one saved choice works for every market. */
@@ -52,12 +81,12 @@ export function periodsAvailable(data) {
 /** A price or (compact) market cap in a currency: "$61,066.00", "¥3,329", "1,234.5p", "£210B", "$0.00000358". */
 export function money(v, cur = 'USD', compact = false) {
   if (v == null || !Number.isFinite(v)) return '—';
-  if (cur === 'GBp' || cur === 'GBX') return compact ? money(v / 100, 'GBP', true) : `${v.toLocaleString('en-US', { maximumFractionDigits: 2 })}p`;
+  if (cur === 'GBp' || cur === 'GBX') return compact ? money(v / 100, 'GBP', true) : `${v.toLocaleString(locale, { maximumFractionDigits: 2 })}p`;
   const opts = compact ? { notation: 'compact', maximumSignificantDigits: 3 } : Math.abs(v) < 1 ? { maximumSignificantDigits: 4 } : {};
   try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: cur || 'USD', ...opts }).format(v);
+    return new Intl.NumberFormat(locale, { style: 'currency', currency: cur || 'USD', ...opts }).format(v);
   } catch {
-    return `${v.toLocaleString('en-US', { maximumSignificantDigits: 6 })} ${cur}`;
+    return `${v.toLocaleString(locale, { maximumSignificantDigits: 6 })} ${cur}`;
   }
 }
 
@@ -157,7 +186,42 @@ export function layoutMap(groups, w, h) {
   return { tiles, labels };
 }
 
-const pct = (v) => (v == null || !Number.isFinite(v) ? '—' : `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(2)}%`);
+/**
+ * The code a market's own traders know a stock by, from Yahoo's symbol: no exchange suffix
+ * (601398.SS → 601398, 7203.T → 7203), Hong Kong's five digits (0700.HK → 00700), and the share
+ * class written the local way (INVE-B.ST → INVE B, BBD-B.TO → BBD.B). US tickers and coins stay.
+ */
+export function tileCode(sym, market) {
+  const s = String(sym || '');
+  if (market === 'us' || market === 'crypto') return s;
+  const code = s.replace(/\.[A-Z]{1,3}$/, '');
+  if (market === 'HK' && /^\d{1,4}$/.test(code)) return code.padStart(5, '0');
+  if (market === 'SE') return code.replace(/-/g, ' ');
+  if (market === 'GB' || market === 'CA') return code.replace(/-/g, '.');
+  return code;
+}
+
+// Legal forms and the like at the end of a company name.
+const LEGAL = /[\s,]+(?:inc\.?|incorporated|corporation|corp\.?|company|co\.?|ltd\.?|limited|plc|p\.l\.c\.|ag|se|s\.e\.|sa|s\.a\.|n\.v\.|nv|s\.p\.a\.|spa|ab|\(publ\)|oyj|asa|a\/s|kgaa|aktiengesellschaft|holdings?|group|société européenne|société en commandite par actions|s\.m\.e\.|tbk|bhd|berhad)$/iu;
+
+/**
+ * A company's everyday name for its tile: no legal form, "Holdings" or "Group", no leading "The"
+ * (Toyota Motor Corporation → Toyota Motor, HSBC Holdings plc → HSBC). `cut`: the name may have
+ * been cut off mid-word (Yahoo's US short names stop at about 30 characters), so drop a partial last word.
+ */
+export function tileName(name, { cut = false } = {}) {
+  const raw = String(name || '');
+  let n = raw;
+  if (cut && n.length >= 30 && !/[\s.,)]$/.test(n)) n = n.replace(/\s+\S+$/, '');
+  n = n.trim().replace(/^the\s+/i, '');
+  for (let prev = ''; prev !== n;) { prev = n; n = n.replace(LEGAL, '').replace(/[\s,&–-]+$/, ''); }
+  return n || raw.trim();
+}
+
+const pct = (v) => (v == null || !Number.isFinite(v) ? '—' : `${v > 0 ? '+' : v < 0 ? '−' : ''}${fixed(Math.abs(v), 2)}%`);
+// The hover card's change rows, in PERIODS order.
+const TIP_STOCKS = [t('hm.period.today'), t('hm.tip.1w'), t('hm.tip.1m'), t('hm.period.3months'), t('hm.period.year')];
+const TIP_CRYPTO = [t('hm.tip.24h'), t('hm.tip.7d'), t('hm.tip.30d'), t('hm.tip.90d'), t('hm.period.year')];
 /** The chart a row opens: its own symbol (crypto), none (a coin with no chart source), or Yahoo's. */
 const chartOf = (r) => (r.full === undefined ? `YAHOO:${r.s}` : r.full);
 
@@ -230,8 +294,8 @@ export class HeatmapPanel {
     document.body.classList.add('heatmap-open');
     window.dispatchEvent(new Event('resize'));
     if ((await dataMode()) !== 'server') {
-      this.body.innerHTML = `<div class="st-empty"><b>The heatmap runs in the desktop app</b>
-        <span>It scans thousands of stocks in 18 markets, and the top coins, with data a website can't fetch directly. Download the desktop app, or run it with <code>npm start</code>.</span></div>`;
+      this.body.innerHTML = `<div class="st-empty"><b>${esc(t('hm.desktop'))}</b>
+        <span>${t('hm.desktopHelp')}</span></div>`;
       return;
     }
     if (!this.data) this.showLoading();
@@ -250,14 +314,13 @@ export class HeatmapPanel {
 
   showLoading() {
     const m = this.state.market;
-    const what = m === 'us' ? 'The first scan of US stocks takes a few seconds.'
-      : m === 'crypto' ? 'Fetching the largest coins by market cap.' : `The first scan of ${esc(marketName(m))}'s stocks takes a few seconds.`;
-    this.body.innerHTML = `<div class="st-empty"><b>Loading the market…</b><span>${what}</span></div>`;
+    const what = m === 'us' ? t('hm.loadingUs') : m === 'crypto' ? t('hm.loadingCrypto') : t('hm.loadingMarket', { market: marketName(m) });
+    this.body.innerHTML = `<div class="st-empty"><b>${esc(t('hm.loading'))}</b><span>${esc(what)}</span></div>`;
   }
 
   showError(msg) {
-    this.body.innerHTML = `<div class="st-empty"><b>Couldn't load the heatmap</b><span>${esc(msg)}</span>
-      <button type="button" class="btn-ghost hm-retry" data-hm-retry="1">Try again</button></div>`;
+    this.body.innerHTML = `<div class="st-empty"><b>${esc(t('hm.loadFailed'))}</b><span>${esc(msg)}</span>
+      <button type="button" class="btn-ghost hm-retry" data-hm-retry="1">${esc(t('hm.tryAgain'))}</button></div>`;
   }
 
   async load() {
@@ -271,7 +334,7 @@ export class HeatmapPanel {
       const r = await fetch(apiUrl(market === 'us' ? 'api/screener' : `api/heatmap?market=${encodeURIComponent(market)}`));
       const j = await r.json().catch(() => null);
       if (!r.ok || !j) throw new Error(j?.error || `HTTP ${r.status}`);
-      if (!Array.isArray(j.rows)) throw new Error('Unexpected answer from the server');
+      if (!Array.isArray(j.rows)) throw new Error(t('hm.badAnswer'));
       this.cache.set(market, j);
       if (document.hidden && gen === this.gen) { this.stalled = true; return; } // hidden meanwhile: draw it when shown
       if (market === this.state.market) {
@@ -315,41 +378,41 @@ export class HeatmapPanel {
 
   get top() { return pickSize(sizesFor(this.state.market), this.state.top); }
 
-  /** What the groups are: sectors, or (crypto) categories or rank tiers. */
-  get groupWord() {
-    if (!this.isCrypto) return ['sector', 'sectors'];
-    return this.data?.grouping === 'rank' ? ['group', 'groups'] : ['category', 'categories'];
+  /** What the groups are called (GROUP_TEXT): sectors, or (crypto) categories or rank tiers. */
+  get groupText() {
+    if (!this.isCrypto) return GROUP_TEXT.sector;
+    return this.data?.grouping === 'rank' ? GROUP_TEXT.group : GROUP_TEXT.category;
   }
 
   renderBar() {
     const st = this.state;
     const ok = periodsAvailable(this.data);
-    const [word, words] = this.groupWord;
+    const words = this.groupText;
     const sub = this.el.querySelector('.sc-sub');
     if (sub) {
       const d = this.data;
-      sub.textContent = st.market === 'us' ? 'US stocks by sector · click a tile to open its chart'
-        : this.isCrypto ? `Top coins by ${d?.grouping === 'rank' ? 'market-cap rank' : 'category'}, no stablecoins · click a tile to open its chart`
-          : `Stocks by sector${d?.capCur ? ` · sizes in ${d.capCur}` : ''} · click a tile to open its chart`;
+      sub.textContent = st.market === 'us' ? t('hm.sub.us')
+        : this.isCrypto ? (d?.grouping === 'rank' ? t('hm.sub.cryptoRank') : t('hm.sub.cryptoCategory'))
+          : d?.capCur ? t('hm.sub.stocksCur', { cur: d.capCur }) : t('hm.sub.stocks');
     }
-    const key = [st.market, st.period, st.sector, this.top, word, [...ok].join()].join('|');
+    const key = [st.market, st.period, st.sector, this.top, words.all, [...ok].join()].join('|');
     if (key === this.barKey) return; // unchanged: don't rebuild (and close) an open menu
     this.barKey = key;
     const shown = this.period[0];
     const sizes = sizesFor(st.market);
     const option = ([k, name]) => `<option value="${k}"${st.market === k ? ' selected' : ''}>${esc(name)}</option>`;
     $('#hm-tools').innerHTML = `
-      <select class="select" data-f="market" aria-label="Market" title="Market">
-        <optgroup label="Stocks">${MARKETS.filter(([k]) => k !== 'crypto').map(option).join('')}</optgroup>
-        <optgroup label="Crypto">${option(['crypto', 'Crypto (top coins)'])}</optgroup>
+      <select class="select" data-f="market" aria-label="${esc(t('hm.market'))}" title="${esc(t('hm.market'))}">
+        <optgroup label="${esc(t('hm.stocks'))}">${MARKETS.filter(([k]) => k !== 'crypto').map(option).join('')}</optgroup>
+        <optgroup label="${esc(t('hm.mkt.crypto'))}">${option(['crypto', t('hm.cryptoTop')])}</optgroup>
       </select>
-      <div class="nw-seg" role="tablist" aria-label="Period">${PERIODS.map(([k, label, title]) => {
+      <div class="nw-seg" role="tablist" aria-label="${esc(t('hm.periodLabel'))}">${PERIODS.map(([k, label, title]) => {
         const off = !ok.has(k);
-        const tip = off ? 'Not available for this market' : this.isCrypto ? CRYPTO_TITLES[k] : title;
-        return `<button data-hm-period="${k}" class="${shown === k ? 'on' : ''}" title="${tip}"${off ? ' disabled' : ''}>${label}</button>`;
+        const tip = off ? t('hm.periodOff') : this.isCrypto ? CRYPTO_TITLES[k] : title;
+        return `<button data-hm-period="${k}" class="${shown === k ? 'on' : ''}" title="${esc(tip)}"${off ? ' disabled' : ''}>${esc(label)}</button>`;
       }).join('')}</div>
-      <select class="select" data-f="top" aria-label="How many">${sizes.map(([v, l]) => `<option value="${v}"${this.top === v ? ' selected' : ''}>${l}</option>`).join('')}</select>
-      <span class="hm-crumb">${st.sector ? `<button data-hm-sector="" title="Back to every ${word}">All ${words}</button> › <b>${esc(st.sector)}</b>` : `<span class="muted">Click a ${word} name to zoom in</span>`}</span>`;
+      <select class="select" data-f="top" aria-label="${esc(t('hm.howMany'))}">${sizes.map(([v, l]) => `<option value="${v}"${this.top === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>
+      <span class="hm-crumb">${st.sector ? `<button data-hm-sector="" title="${esc(words.back)}">${esc(words.all)}</button> › <b>${esc(groupName(st.sector))}</b>` : `<span class="muted">${esc(words.hint)}</span>`}</span>`;
   }
 
   onChange(e) {
@@ -374,6 +437,22 @@ export class HeatmapPanel {
     if (full) this.onPick(full);
   }
 
+  /** How wide a tile label is, in ems of the tiles' bold font (measured once per label). */
+  textEm(text) {
+    this.emCache ||= new Map();
+    let em = this.emCache.get(text);
+    if (em === undefined) {
+      if (this.measure === undefined) {
+        this.measure = document.createElement('canvas').getContext('2d');
+        if (this.measure) this.measure.font = `700 100px ${getComputedStyle(this.body).fontFamily}`;
+      }
+      // + the 0.01em letter spacing of .hm-tile b
+      em = (this.measure ? this.measure.measureText(text).width / 100 : text.length * 0.62) + 0.01 * text.length;
+      this.emCache.set(text, em);
+    }
+    return em;
+  }
+
   draw() {
     if (!this.data) return;
     const st = this.state;
@@ -392,50 +471,63 @@ export class HeatmapPanel {
     this.drawnKey = drawKey();
     const { tiles, labels } = layoutMap(groups, w, h);
     this.tiles = tiles;
-    const [word] = this.groupWord;
+    const words = this.groupText;
     const html = [];
+    const cutNames = st.market === 'us';
     for (const t of tiles) {
       if (t.w < 1 || t.h < 1) continue;
       const v = t.r[key];
-      const big = t.w > 56 && t.h > 34;
-      const fs = Math.max(9, Math.min(30, Math.min(t.w / 4.2, t.h / 2.6)));
-      const text = big
-        ? `<b style="font-size:${fs.toFixed(0)}px">${esc(t.r.s)}</b><small style="font-size:${Math.max(9, fs * 0.6).toFixed(0)}px">${pct(v)}</small>`
-        : t.w > 26 && t.h > 13 ? `<b style="font-size:${Math.max(8, Math.min(12, t.h / 1.6, t.w / 4)).toFixed(0)}px">${esc(t.r.s)}</b>` : '';
+      const code = tileCode(t.r.s, st.market);
+      const em = this.textEm(code);
+      let text = '';
+      if (t.w > 56 && t.h > 34) {
+        // The code as big as the tile allows, shrunk until it fits; the company's name under it on large tiles.
+        const fs = Math.max(9, Math.min(30, t.w / 4.2, t.h / 2.6, (t.w - 8) / em));
+        const small = Math.max(9, fs * 0.6);
+        const name = tileName(t.r.n, { cut: cutNames });
+        const nameFs = Math.max(9, Math.min(13, fs * 0.45));
+        const showName = name && name.toUpperCase() !== code.toUpperCase() && t.w >= 70 && t.h >= (fs + small) * 1.05 + nameFs * 1.2 + 10;
+        text = `<b style="font-size:${fs.toFixed(0)}px">${esc(code)}</b>${showName ? `<span class="hm-name" style="font-size:${nameFs.toFixed(0)}px">${esc(name)}</span>` : ''}<small style="font-size:${small.toFixed(0)}px">${pct(v)}</small>`;
+      } else if (t.w > 26 && t.h > 13) {
+        const fs = Math.min(12, t.h / 1.6, t.w / 4, (t.w - 4) / em);
+        if (fs >= 7.5) text = `<b style="font-size:${fs.toFixed(0)}px">${esc(code)}</b>`;
+      }
       const full = chartOf(t.r);
       html.push(`<div class="hm-tile${full ? '' : ' no-chart'}" data-sym="${esc(t.r.s)}"${full ? ` data-full="${esc(full)}"` : ''} style="left:${t.x.toFixed(1)}px;top:${t.y.toFixed(1)}px;width:${t.w.toFixed(1)}px;height:${t.h.toFixed(1)}px;background:${heatColor(v, max)}">${text}</div>`);
     }
     for (const l of labels) {
-      html.push(`<button class="hm-sector" data-hm-sector="${esc(st.sector ? '' : l.sector)}" style="left:${l.x.toFixed(1)}px;top:${l.y.toFixed(1)}px;width:${l.w.toFixed(1)}px" title="${st.sector ? `Back to every ${word}` : `Zoom in on ${esc(l.name)}`}">${esc(l.name)}</button>`);
+      const name = groupName(l.name);
+      html.push(`<button class="hm-sector" data-hm-sector="${esc(st.sector ? '' : l.sector)}" style="left:${l.x.toFixed(1)}px;top:${l.y.toFixed(1)}px;width:${l.w.toFixed(1)}px" title="${esc(st.sector ? words.back : t('hm.zoomIn', { name }))}">${esc(name)}</button>`);
     }
     const busy = this.data.tech && this.data.tech.done < this.data.tech.total;
     const missing = tiles.filter((t) => t.r[key] == null).length;
-    const note = this.error ? ` · couldn't update (${esc(this.error)}), retrying`
-      : missing ? ` · ${missing} ${busy && key !== 'c' ? 'still being calculated' : 'without data'}` : '';
+    const note = this.error ? ` · ${esc(t('hm.updateFailed', { error: this.error }))}`
+      : missing ? ` · ${esc(busy && key !== 'c' ? t('hm.calculating', { n: missing }) : t('hm.noData', { n: missing }))}` : '';
     const stops = [-1, -0.66, -0.33, 0, 0.33, 0.66, 1];
-    const cap = this.data.capCur && this.data.capCur !== 'USD' ? ` in ${esc(this.data.capCur)}` : '';
+    const cur = this.data.capCur && this.data.capCur !== 'USD' ? this.data.capCur : '';
+    const time = new Date(this.data.updated).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
     const legend = `<div class="hm-legend">
       <span class="muted">${esc(title)}${note}</span>
       <span class="spacer"></span>
       ${stops.map((s) => `<i style="background:${heatColor(s * max, max)}">${s === 0 ? '0%' : `${s > 0 ? '+' : '−'}${Math.round(Math.abs(s) * max)}%`}</i>`).join('')}
-      <span class="muted hm-updated">Size: market cap${cap} · updated ${new Date(this.data.updated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+      <span class="muted hm-updated">${esc(cur ? t('hm.legendCur', { cur, time }) : t('hm.legend', { time }))}</span>
     </div>`;
     this.body.innerHTML = `<div class="hm-map" style="height:${h}px">${html.join('')}</div>${legend}`;
   }
 
   onHover(e) {
-    const t = e.target.closest('.hm-tile');
-    if (!t) { this.tip.hidden = true; return; }
-    const r = this.rowBy.get(t.dataset.sym);
+    const tile = e.target.closest('.hm-tile');
+    if (!tile) { this.tip.hidden = true; return; }
+    const r = this.rowBy.get(tile.dataset.sym);
     if (!r) return;
     const d = this.data;
     const cur = d.cur || 'USD', capCur = d.capCur || 'USD';
-    const labels = this.isCrypto ? ['24 hours', '7 days', '30 days', '90 days', '1 year'] : ['Today', '1 week', '1 month', '3 months', '1 year'];
-    const line = (label, v) => `<span>${label}</span><b class="${v > 0 ? 'up' : v < 0 ? 'down' : ''}">${pct(v)}</b>`;
-    const about = [r.sec, r.ind, r.rank ? `#${r.rank} by market cap` : '', chartOf(r) ? '' : 'no chart for this coin'].filter(Boolean).join(' · ');
+    const labels = this.isCrypto ? TIP_CRYPTO : TIP_STOCKS;
+    const line = (label, v) => `<span>${esc(label)}</span><b class="${v > 0 ? 'up' : v < 0 ? 'down' : ''}">${pct(v)}</b>`;
+    const about = [r.sec && groupName(r.sec), r.ind, r.rank ? t('hm.rank', { rank: r.rank }) : '', chartOf(r) ? '' : t('hm.noChart')].filter(Boolean).join(' · ');
     this.tip.innerHTML = `<div class="hm-tip-head"><b>${esc(r.s)}</b> <span>${esc(r.n || '')}</span></div>
       <div class="muted">${esc(about)}</div>
-      <div class="hm-tip-grid"><span>Price</span><b>${money(r.p, cur)}</b>${PERIODS.map(([k], i) => line(labels[i], r[k])).join('')}<span>Market cap</span><b>${money(r.m, capCur, true)}</b></div>`;
+      <div class="hm-tip-grid"><span>${esc(t('common.price'))}</span><b>${money(r.p, cur)}</b>${PERIODS.map(([k], i) => line(labels[i], r[k])).join('')}<span>${esc(t('hm.marketCap'))}</span><b>${money(r.m, capCur, true)}</b></div>`;
     this.tip.hidden = false;
     const pad = 14;
     const tw = this.tip.offsetWidth, th = this.tip.offsetHeight;
