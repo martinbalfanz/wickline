@@ -94,6 +94,40 @@ app.whenReady().then(async () => {
     await wait(3000);
     const count = await run(`document.querySelector('#mk-count')?.textContent || ''`);
     check('Markets panel lists thousands of US stocks', Number(count.replace(/\D/g, '')) > 5000, count);
+    // 2b. Watchlist: sections and drag to reorder (issue #3), saved across restarts.
+    await run(`document.querySelector('.side-tabs [data-tab="watchlist"]').click()`);
+    await wait(300);
+    const wlOrder = () => run(`[...document.querySelectorAll('#wl-rows .wl-row, #wl-rows .wl-sec')].map((r) => (r.dataset.sec ? '§' + r.dataset.sec : r.dataset.sym) + (r.hidden ? '(hidden)' : ''))`);
+    const wlDrag = (fromSel, toSel, below) => run(`(() => {
+      const list = document.querySelector('#wl-rows'), from = document.querySelector('${fromSel}'), to = document.querySelector('${toSel}');
+      const a = from.getBoundingClientRect(), b = to.getBoundingClientRect(), y = ${below} ? b.bottom - 3 : b.top + 3;
+      const ev = (type, el, cy) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 9, pointerType: 'mouse', button: 0, buttons: 1, clientX: a.left + 40, clientY: cy }));
+      ev('pointerdown', from.querySelector('.wl-sym, .wl-sec-name'), a.top + a.height / 2);
+      ev('pointermove', list, a.top + a.height / 2 + 8); ev('pointermove', list, y); ev('pointerup', list, y);
+    })()`);
+    const wl0 = await wlOrder();
+    await run(`document.querySelector('#wl-sec-add').click()`);
+    await wait(200);
+    await run(`(() => { const i = document.querySelector('.wl-sec-input'); i.value = 'Crypto'; i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
+    await wait(200);
+    const wlBtc = '#wl-rows .wl-row[data-sym="BINANCE:BTCUSDT"]';
+    await wlDrag(wlBtc, '#wl-rows .wl-sec', true);
+    await wait(200);
+    const wl1 = await wlOrder();
+    check('watchlist sections: add one, drag a symbol into it', wl1.at(-2) === '§Crypto' && wl1.at(-1) === 'BINANCE:BTCUSDT' && wl1.length === wl0.length + 1, wl1.slice(-3).join(' '));
+    await run(`document.querySelector('#wl-rows .wl-sec .wl-sec-toggle').click()`);
+    await wait(200);
+    const wlSaved = JSON.parse(await run(`localStorage.getItem('wickline.watchlist')`));
+    check('a section collapses, and the order is saved', (await wlOrder()).at(-1) === 'BINANCE:BTCUSDT(hidden)' && wlSaved.at(-2) === '§Crypto', wlSaved.slice(-2).join(' '));
+    await run(`document.querySelector('#wl-rows .wl-sec .wl-sec-toggle').click()`);
+    await wait(200);
+    await wlDrag(wlBtc, '#wl-rows .wl-row[data-i="0"]', false);
+    await wait(200);
+    await run(`document.querySelector('#wl-rows .wl-sec .wl-sec-del').click()`);
+    await wait(200);
+    const wl2 = await wlOrder();
+    check('drag back to the top; deleting the section keeps its symbols', JSON.stringify(wl2) === JSON.stringify(wl0), wl2.slice(0, 3).join(' '));
+    await run(`document.querySelector('.side-tabs [data-tab="markets"]').click()`);
 
     // 3. Theme dialog: presets and custom colors change the page.
     const accent = () => run(`getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()`);

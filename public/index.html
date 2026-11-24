@@ -240,9 +240,14 @@
     <section class="side-panel" data-panel="watchlist">
       <div class="wl-head">
         <button id="wl-browse" class="link-btn" title="Every US stock and ETF, every crypto pair, plus world indices, forex, futures and more" data-i18n-title="app.wl.browseTip" data-i18n="app.wl.browse">Browse all markets (15,000+) →</button>
-        <button id="wl-add" class="tb-btn icon" title="Add symbol" aria-label="Add symbol" data-i18n-title="app.wl.add" data-i18n-aria-label="app.wl.add">
-          <svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-        </button>
+        <div>
+          <button id="wl-sec-add" class="tb-btn icon" title="Add section" aria-label="Add section" data-i18n-title="app.wl.addSection" data-i18n-aria-label="app.wl.addSection">
+            <svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 7h10M4 12h7M4 17h7M17 13v8M13 17h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+          <button id="wl-add" class="tb-btn icon" title="Add symbol" aria-label="Add symbol" data-i18n-title="app.wl.add" data-i18n-aria-label="app.wl.add">
+            <svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </div>
       </div>
       <div class="wl-cols"><span data-i18n="common.symbol">Symbol</span><span data-i18n="common.last">Last</span><span data-i18n="common.changePct">Chg%</span></div>
       <div id="wl-rows" class="wl-rows"></div>

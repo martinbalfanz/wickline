@@ -16,6 +16,7 @@ import {
 import { TOOLS } from './drawings.js';
 import { SymbolSearch } from './search.js';
 import { QuoteList } from './quote-list.js';
+import { cleanList, isSection, sectionName, symbolsOf, addSection, renameSection, removeSection, moveEntry } from './watchlist.js';
 import { MarketBrowser } from './market-browser.js';
 import { MARKET_GROUPS } from './markets.js';
 import { AlertManager, CONDITIONS, alertText, chime } from './alerts.js';
@@ -200,7 +201,7 @@ function createView(state) {
 function newChartState() {
   const base = activeView?.state || ws.charts[0] || normalizeChartState();
   const used = new Set(ws.charts.map((s) => s.symbol));
-  const symbol = watchSymbols.find((s) => !used.has(s)) || base.symbol;
+  const symbol = symbolsOf(watchSymbols).find((s) => !used.has(s)) || base.symbol;
   return cloneChartState(base, { symbol, compares: [] });
 }
 
@@ -1077,18 +1078,40 @@ scriptStore.onChange(() => { if (!indModal.hidden) renderIndicatorList(); });
 // Side panel: watchlist, markets, alerts
 // ---------------------------------------------------------------------------
 
-let watchSymbols = store.get('watchlist', DEFAULT_WATCHLIST);
+// Symbols and section headings in order (public/js/watchlist.js); collapsed sections by name.
+let watchSymbols = cleanList(store.get('watchlist', DEFAULT_WATCHLIST)) || [...DEFAULT_WATCHLIST];
+const collapsedSections = new Set(store.get('watchlistCollapsed', []));
+const saveCollapsed = () => store.set('watchlistCollapsed', [...collapsedSections]);
 const watchlistList = new QuoteList($('#wl-rows'), {
   onSelect: (full) => activeView?.setSymbol(full),
   onRemove: (full) => setWatchlist(watchSymbols.filter((s) => s !== full)),
+  onMove: (from, to) => setWatchlist(moveEntry(watchSymbols, from, to)),
+  sections: {
+    onToggle: (name) => {
+      if (collapsedSections.has(name)) collapsedSections.delete(name); else collapsedSections.add(name);
+      saveCollapsed();
+      setWatchlist(watchSymbols);
+    },
+    onRename: (name, to) => {
+      const next = renameSection(watchSymbols, name, to);
+      if (collapsedSections.delete(name)) { collapsedSections.add(next.name); saveCollapsed(); }
+      setWatchlist(next.list);
+    },
+    onRemove: (name) => {
+      if (collapsedSections.delete(name)) saveCollapsed();
+      setWatchlist(removeSection(watchSymbols, name));
+    },
+  },
   empty: t('app.wl.empty'),
   useCredits: true,
 });
 
 function setWatchlist(list) {
-  watchSymbols = [...new Set(list)];
+  watchSymbols = cleanList(list) || [];
   store.set('watchlist', watchSymbols);
-  watchlistList.setItems(watchSymbols.map((full) => ({ full })));
+  watchlistList.setItems(watchSymbols.map((e) => (isSection(e)
+    ? { section: sectionName(e), collapsed: collapsedSections.has(sectionName(e)) }
+    : { full: e })));
   watchlistList.setActive(activeView?.state.symbol);
   marketsList.refreshStars();
 }
@@ -1200,6 +1223,12 @@ document.querySelector('.side-tabs').addEventListener('click', (e) => {
   if (b) showTab(b.dataset.tab);
 });
 $('#wl-add').addEventListener('click', () => search.open('add'));
+$('#wl-sec-add').addEventListener('click', () => {
+  const { list, name } = addSection(watchSymbols, t('wl.newSection'));
+  setWatchlist(list);
+  watchlistList.el.scrollTop = watchlistList.el.scrollHeight;
+  watchlistList.editSection(name); // type its name right away
+});
 $('#wl-browse').addEventListener('click', () => showTab('markets'));
 
 // Alerts

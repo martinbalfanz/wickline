@@ -485,6 +485,29 @@ body.popout .hide-popout { display: none; }
 .wl-row:hover .wl-star { opacity: 0.8; }
 .wl-star.on { color: #F7A600; opacity: 1; }
 .wl-empty { padding: 20px 14px; color: var(--muted); }
+/* Watchlist: drag to reorder, sections */
+#wl-rows { position: relative; user-select: none; }
+#wl-rows .wl-row { position: relative; }
+.wl-row[hidden] { display: none; }
+.wl-grip { position: absolute; left: 3px; top: 50%; width: 8px; height: 14px; margin-top: -7px; opacity: 0; cursor: grab; touch-action: none;
+  color: var(--muted); background-image: radial-gradient(currentColor 1px, transparent 1.3px); background-size: 4px 4px; }
+.wl-row:hover .wl-grip { opacity: 0.8; }
+@media (hover: none) { .wl-grip { opacity: 0.6; } }
+.wl-sec { display: flex; align-items: center; gap: 2px; height: 30px; padding: 0 6px 0 4px; border-top: 1px solid var(--border);
+  color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: 0.02em; cursor: pointer; }
+.wl-sec:hover { background: var(--panel-2); color: var(--text); }
+.wl-sec-toggle, .wl-sec-del { color: var(--muted); width: 22px; height: 22px; border-radius: 4px; display: grid; place-items: center; flex: none; }
+.wl-sec-toggle svg { transition: transform 0.15s; }
+.wl-sec.closed .wl-sec-toggle svg { transform: rotate(-90deg); }
+.wl-sec-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wl-sec-del { opacity: 0; font-size: 17px; line-height: 1; }
+.wl-sec:hover .wl-sec-del { opacity: 1; }
+.wl-sec-toggle:hover, .wl-sec-del:hover { color: var(--text-strong); background: var(--panel); }
+.wl-sec-input { flex: 1; min-width: 0; height: 22px; padding: 0 6px; border: 1px solid var(--accent); border-radius: 4px;
+  background: var(--panel); color: var(--text-strong); font: inherit; font-weight: 600; user-select: text; }
+.wl-row.dragging, .wl-sec.dragging { opacity: 0.4; }
+.wl-dragging, .wl-dragging * { cursor: grabbing !important; }
+.wl-drop { position: absolute; left: 6px; right: 6px; height: 2px; border-radius: 1px; background: var(--accent); pointer-events: none; z-index: 2; }
 .flash-up { animation: flashUp 0.8s; }
 .flash-down { animation: flashDown 0.8s; }
 @keyframes flashUp { from { background: rgba(52, 184, 134, 0.35); } to { background: transparent; } }

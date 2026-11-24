@@ -143,7 +143,7 @@ A free, open-source charting platform.
 - **Price alerts:** crossing, crossing up or crossing down. You get a sound, an on-screen message and an optional desktop notification. Create them from a horizontal line with one click.
 
 **Everything else**
-- Watchlist with live prices.
+- Watchlist with live prices: drag symbols into any order, and group them into your own sections (add one with the button next to +, double-click its name to rename it, click it to collapse it).
 - Saves your layout, charts, drawings, scripts and alerts on your computer.
 - Shareable links, such as `/#s=YAHOO:AAPL&tf=1D`.
 - Save the chart as a PNG.
@@ -466,7 +466,7 @@ Web app (public/, plain static files), in the window or any browser:
 | `public/js/backtest.js`, `strategy-tester.js` | The bar-by-bar backtest engine and the Strategy Tester panel. |
 | `test/` | `npm test`: offline unit tests (backtest engine, strategy API and templates, all 100 indicators, bad-print filter, data decoding, screener, news ranking, calendar and markets outside the US, paper trading, heatmap layout and markets, option chains and Greeks, chart layouts, the script sandbox and result checks, community publishing, server). `npm run test:e2e`: drives the real desktop app with live data (needs internet). |
 | `public/js/drawings.js`, `primitives.js` | Drawing tools, shaded bands and the countdown, drawn through the chart library's plugin API. |
-| `public/js/markets.js`, `market-browser.js`, `quote-list.js`, `alerts.js`, `search.js` | Markets catalog, the fast-scrolling markets list, the watchlist, alerts, symbol search. |
+| `public/js/markets.js`, `market-browser.js`, `quote-list.js`, `watchlist.js`, `alerts.js`, `search.js` | Markets catalog, the fast-scrolling markets list, the watchlist (its order and sections), alerts, symbol search. |
 | `public/js/screener.js`, `heatmap.js`, `news.js` | The Screener, Heatmap (a squarified treemap) and News panels. |
 | `public/js/options.js`, `lib/options.mjs` | The Options panel, and its option chains: Yahoo's and Deribit's in one shape, with Black-Scholes Greeks, implied volatility, expected move, put/call ratios, max pain and unusual activity (pure, unit-tested). |
 | `public/js/paper.js`, `trading.js` | Paper trading: the simulated account (orders, fills, stops, P&L) and the Paper trading panel. Bar replay lives in `chart-view.js`. |
