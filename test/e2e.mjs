@@ -23,6 +23,7 @@ const CHARTS = [
   ['YAHOO:AAPL', '1D'], ['YAHOO:NVDA', '5m'], ['YAHOO:SPY', '1h'], ['YAHOO:^GSPC', '1W'],
   ['YAHOO:EURUSD=X', '15m'], ['YAHOO:GC=F', '1D'], ['YAHOO:SAP.DE', '1D'],
   ['BINANCE:BTCUSDT', '1m'], ['BINANCEF:ETHUSDT', '4h'], ['COINBASE:BTC-USD', '1D'],
+  ['BYBIT:BTCUSDT', '15m'], ['BYBITF:SOLUSDT', '1h'], ['OKX:ETH-USDT', '4h'], ['OKXF:BTC-USDT', '1D'], ['YAHOO:USDJPY=X', '1D'],
 ];
 
 let failed = 0;
@@ -74,11 +75,19 @@ app.whenReady().then(async () => {
     for (const [sym, tf] of CHARTS) {
       const r = await open(sym, tf);
       // The chart must be the one asked for, not a leftover from the previous page.
-      const want = sym.split(':')[1].replace(/=X|=F|-USD|\.DE|\^/g, '').replace(/[^A-Z]/g, '').slice(0, 4);
+      const want = sym.split(':')[1].replace(/=X|=F|-USD\b|\.DE|\^/g, '').replace(/[^A-Z]/g, '').slice(0, 4);
       const titled = (r.title || '').toUpperCase().replace(/[^A-Z]/g, '').includes(want);
       check(`${sym} ${tf} loads`, !r.error && titled && /^O\S+ H\S+ L\S+ C\S+/.test(r.legend || ''),
         r.error || `${(r.title || '').slice(0, 36)} | ${(r.legend || '').slice(0, 44)}`);
     }
+    // Daily forex (the last chart opened): Yahoo's closes are rebuilt, so the candles have bodies.
+    const fx = await run(`(() => { const b = window.__wickline.views()[0].bars.slice(-60, -1); return { n: b.length, flat: b.filter((x) => Math.abs(x.close - x.open) < 0.05 * (x.high - x.low)).length }; })()`);
+    check('daily forex candles have real bodies', fx.n > 40 && fx.flat < fx.n * 0.2, JSON.stringify(fx));
+    // Bybit and OKX: in the symbol search and as whole markets.
+    const exch = await run(`import('./js/datafeed.js').then(async (m) => ({ search: [...new Set((await m.searchCrypto('SOL')).map((r) => r.full.split(':')[0]))],
+      markets: Object.fromEntries(await Promise.all(['bybit', 'bybitf', 'okx', 'okxf'].map(async (id) => [id, (await m.loadUniverse(id)).length]))) }))`);
+    check('symbol search finds Bybit and OKX spot and perpetuals', ['BYBIT', 'BYBITF', 'OKX', 'OKXF'].every((x) => exch.search.includes(x)), exch.search.join(','));
+    check('Markets can list all of Bybit and OKX', Object.values(exch.markets).every((n) => n > 100), JSON.stringify(exch.markets));
     const first = await open('YAHOO:AAPL', '1D');
     check('desktop data mode uses the built-in server', first.mode === 'server', first.mode);
     check('tab title shows symbol and price', /^AAPL [\d,.]+ [▲▼]/.test(first.tabTitle), first.tabTitle);
@@ -638,9 +647,9 @@ app.whenReady().then(async () => {
     for (let i = 0; i < 30; i++) { await wait(500); if (await run(`(() => { const v = ${activeChart}; return v.state.symbol === 'YAHOO:SPY' && v.bars.length > 10; })()`)) break; }
     await run(`document.querySelector('#op-btn').click()`);
     for (let i = 0; i < 60; i++) { await wait(500); if (await run(`!!document.querySelector('.op-table tbody tr[data-i]') || !!document.querySelector('#op-body [data-op-retry], .op-none')`)) break; }
-    const opInfo = () => run(`(() => { const c = document.querySelector('.op-chain'), s = c?.querySelector('.op-spot'), sel = document.querySelector('#op-tools select');
+    const opInfo = () => run(`(() => { const c = document.querySelector('.op-chain'), s = c?.querySelector('.op-spot'), btn = document.querySelector('#op-tools .op-exp-btn');
       return { symbol: document.querySelector('#op-symbol').textContent, src: document.querySelector('#op-src').innerText.trim(),
-        expiries: sel ? sel.options.length : 0, expiry: sel ? sel.value : null, rows: document.querySelectorAll('.op-table tbody tr[data-i]').length,
+        expiries: Number(document.querySelector('#op-tools .op-count')?.textContent.match(/\\d+/)?.[0] || 0), expiry: btn?.dataset.exp ?? null, rows: document.querySelectorAll('.op-table tbody tr[data-i]').length,
         atmVisible: !!s && s.offsetTop >= c.scrollTop && s.offsetTop <= c.scrollTop + c.clientHeight,
         kpis: [...document.querySelectorAll('.op-kpis .st-kpi')].map((k) => [k.querySelector('span').textContent, k.querySelector('b').textContent]),
         chart: !!document.querySelector('.op-oi canvas'), unusual: document.querySelectorAll('.op-ua-row').length + document.querySelectorAll('.op-ua-list .op-note').length,
@@ -653,10 +662,16 @@ app.whenReady().then(async () => {
     check('...with the price, ATM IV and expected move filled in', /^[\d,.]+$/.test(spy.kpis[0]?.[1] || '') && /^\d+(\.\d)?%$/.test(kpi(spy, 'ATM IV'))
       && /^±[\d,.]+$/.test(kpi(spy, 'Expected move')) && /^±[\d,.]+$/.test(kpi(spy, '1σ move')) && spy.chart && spy.unusual > 0, shortOp(spy));
     const firstExpiry = spy.expiry;
-    await run(`(() => { const s = document.querySelector('#op-tools select'); s.value = s.options[3].value; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
-    for (let i = 0; i < 30; i++) { await wait(500); if (await run(`document.querySelector('#op-tools select')?.selectedIndex === 3`)) break; }
+    await run(`document.querySelector('#op-tools .op-exp-btn').click()`);
+    await wait(300);
+    const opMenu = await run(`(() => { const m = document.querySelector('.op-exp-menu'); return { open: !m.hidden, rows: m.querySelectorAll('.op-exp-row').length, monthly: m.querySelectorAll('.op-exp-row.op-monthly').length, months: m.querySelectorAll('.menu-title').length, on: m.querySelectorAll('.op-exp-row.on').length }; })()`);
+    const wantExpiry = await run(`(() => { const c = document.querySelectorAll('.op-exp-menu .op-exp-row')[3]; c.click(); return c.dataset.exp; })()`);
+    const expiryKpi = kpi(spy, 'Expiry');
+    for (let i = 0; i < 30; i++) { await wait(500); const o = await opInfo(); if (o.expiry === wantExpiry && kpi(o, 'Expiry') !== expiryKpi && o.rows >= 20) break; }
     const spy2 = await opInfo();
-    check('...another expiry loads its own chain', spy2.expiry !== firstExpiry && spy2.rows >= 20 && spy2.atmVisible, shortOp(spy2));
+    check('...the expiry menu lists every expiry by month, marks monthlies and the picked one', opMenu.open && opMenu.rows === spy.expiries && opMenu.monthly >= 1 && opMenu.months >= 2 && opMenu.on === 1, JSON.stringify(opMenu));
+    check('...and closes once one is picked', await run(`document.querySelector('.op-exp-menu').hidden`));
+    check('...another expiry loads its own chain', spy2.expiry !== firstExpiry && kpi(spy2, 'Expiry') !== expiryKpi && spy2.rows >= 20 && spy2.atmVisible, shortOp(spy2));
     const contract = await run(`(() => { const td = document.querySelector('.op-spot').nextElementSibling.querySelector('td[data-side="c"]');
       const k = td.closest('tr').querySelector('.op-k').textContent; setTimeout(() => td.click(), 0); return k; })()`);
     let opChart = null;
@@ -825,8 +840,8 @@ app.whenReady().then(async () => {
         options: [...document.querySelectorAll('#set-lang option')].map((o) => o.value).join(),
         status: document.querySelector('#status-text').textContent, legend: document.querySelector('.cell .lg-ohlc')?.innerText.replace(/\\s+/g, ' ').trim() || '' })`);
     };
-    // Prices in the legend use the language's decimal mark: AAPL's "O348,03 H…" in Spanish and Portuguese.
-    const decimals = (id, legend) => (['es', 'pt-BR'].includes(id) ? /^O[\d.]*\d,\d\d /.test(legend) : /^O[\d,]*\d\.\d\d /.test(legend));
+    // Prices in the legend use the language's decimal mark: AAPL's "O348,03 H…" in Spanish, Portuguese, Italian, German and French.
+    const decimals = (id, legend) => (['es', 'pt-BR', 'it', 'de', 'fr'].includes(id) ? /^O[\d.]*\d,\d\d /.test(legend) : /^O[\d,]*\d\.\d\d /.test(legend));
     const langIds = LANGUAGES.map((x) => x.id);
     for (const id of langIds.filter((x) => x !== 'en')) {
       const word = (await import(`../public/js/lang/${id}.js`)).default['app.hdr.ind'];

@@ -150,6 +150,7 @@ const ICON_STEP = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M6 5
 const ICON_CUT = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M12 3v18" stroke="currentColor" stroke-width="1.8" stroke-dasharray="2.5 2.5"/><path d="M5 9l-2 3 2 3M19 9l2 3-2 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 export const REPLAY_SPEEDS = [[0.5, '0.5×'], [1, '1×'], [2, '2×'], [3, '3×'], [5, '5×'], [10, '10×']];
 const ICON_BELL = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20a2 2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
+const ICON_LABELS = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M4 7V5h11v2M9.5 5v13M7.5 18h4M14 12h6M17 12v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 /**
  * A series' price format with p decimals. Lightweight Charts writes its scale with a dot, so where
@@ -250,6 +251,7 @@ export class ChartView {
         <div class="db-colors">${DRAW_COLORS.map((c) => `<button data-color="${c}" style="--c:${c}" aria-label="${t('chart.colorAria', { color: c })}"></button>`).join('')}</div>
         <input class="db-text" placeholder="${t('draw.tool.text')}" maxlength="80" hidden>
         <button data-db="alert" title="${t('chart.alertAtPrice')}" hidden>${ICON_BELL}</button>
+        <button data-db="labels" class="db-labels" hidden>${ICON_LABELS}</button>
         <button data-db="delete" title="${t('chart.deleteDel')}">${ICON_TRASH}</button>
       </div>
       <div class="rp-pick" hidden><div class="rp-dim"></div></div>
@@ -417,7 +419,7 @@ export class ChartView {
       if (this.beginPaperDrag(p, e)) return;
       if (!this.drawings.beginDrag(p.x, p.y)) return;
       this.chart.applyOptions({ handleScroll: false, handleScale: false });
-      const move = (ev) => { const q = this.paneCoords(ev, true); if (q) this.drawings.dragMove(q.x, q.y); };
+      const move = (ev) => { const q = this.paneCoords(ev, true); if (q) this.drawings.dragMove(q.x, q.y, ev.shiftKey); };
       const up = () => {
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
@@ -433,7 +435,7 @@ export class ChartView {
       if (!start || Math.hypot(e.clientX - start.x, e.clientY - start.y) > 4) return; // a drag
       if (this.dragged) { this.dragged = false; return; }
       if (this.replayPick) { this.pickReplayAt(this.paneCoords(e)); return; }
-      this.drawings.handleClick({ point: this.paneCoords(e) });
+      this.drawings.handleClick({ point: this.paneCoords(e), shift: e.shiftKey });
     }, true);
 
     this.chart.subscribeCrosshairMove((param) => {
@@ -509,6 +511,10 @@ export class ChartView {
       if (color) { this.drawings.updateSelected({ color }); return; }
       const act = e.target.closest('[data-db]')?.dataset.db;
       if (act === 'delete') this.drawings.deleteSelected();
+      if (act === 'labels') {
+        const d = this.drawings.selected;
+        if (d) this.drawings.updateSelected({ labels: d.labels === false ? undefined : false });
+      }
       if (act === 'alert') {
         const d = this.drawings.selected;
         if (d) this.hooks.onCreateAlert?.(this, d.p1.price);
@@ -528,6 +534,12 @@ export class ChartView {
     if (d.type === 'text' && document.activeElement !== text) text.value = d.text || '';
     bar.querySelector('[data-db="alert"]').hidden = !(d.type === 'hline' || d.type === 'hray');
     bar.querySelector('.db-colors').hidden = ['fib', 'long', 'short', 'measure'].includes(d.type);
+    const labels = bar.querySelector('[data-db="labels"]');
+    labels.hidden = !['fib', 'long', 'short', 'avwap'].includes(d.type);
+    const shown = d.labels !== false;
+    labels.classList.toggle('on', shown);
+    labels.title = t(shown ? 'chart.labelsHide' : 'chart.labelsShow');
+    labels.setAttribute('aria-pressed', String(shown));
   }
 
   // --- main series -------------------------------------------------------------

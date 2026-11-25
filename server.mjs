@@ -12,7 +12,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { fetchUsList } from './lib/market-lists.mjs';
-import { cleanSpikes } from './lib/clean-bars.mjs';
+import { cleanSpikes, fixFxDailyCloses } from './lib/clean-bars.mjs';
 import { technicals, buildRow, insights } from './lib/screener.mjs';
 import { parseFeed, buildNameIndex, buildStories, rankStories, CRYPTO } from './lib/news.mjs';
 import { parseFomc, shapeEcon, shapeEarnings } from './lib/calendar.mjs';
@@ -172,6 +172,8 @@ function normalizeChart(json, tfCfg) {
 
   // Bad prints (mostly pre-market / after-hours) would squash the chart; clip them.
   if (!tfCfg.daily) bars = cleanSpikes(bars);
+  // Daily forex bars come with each finished day's close equal to its open: rebuild the closes.
+  if (tfCfg.interval === '1d' && m.instrumentType === 'CURRENCY') fixFxDailyCloses(bars);
 
   // Grouped timeframes restart at each session's open (from Yahoo's trading periods; a day they
   // don't cover starts at its first bar). The chart starts live bars of a new session there too.

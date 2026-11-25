@@ -175,8 +175,8 @@ kbd { font: 11px var(--mono); color: var(--muted); margin-left: auto; }
 }
 .toolbar button { color: var(--text); border-radius: var(--radius); }
 .tool-group { position: relative; display: flex; }
-.tool-group > button[data-tool], #clear-drawings { width: 36px; height: 36px; display: grid; place-items: center; }
-.toolbar button[data-tool]:hover, #clear-drawings:hover { background: var(--panel-2); }
+.tool-group > button[data-tool], #clear-drawings, #magnet-btn { width: 36px; height: 36px; display: grid; place-items: center; }
+.toolbar button[data-tool]:hover, #clear-drawings:hover, #magnet-btn:hover { background: var(--panel-2); }
 .toolbar button.on { color: var(--accent-text); background: var(--accent-soft); }
 .tool-more {
   position: absolute; right: -5px; top: 0; bottom: 0; width: 10px;
@@ -253,6 +253,7 @@ body.popout .hide-popout { display: none; }
 .db-colors button.on { border-color: var(--text-strong); }
 .draw-bar > button { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 4px; color: var(--muted); }
 .draw-bar > button:hover { color: var(--text-strong); background: var(--panel-2); }
+.draw-bar > button.db-labels.on { color: var(--text-strong); }
 .db-text {
   width: 160px; height: 26px; padding: 0 8px;
   background: var(--bg); color: var(--text-strong);
@@ -288,8 +289,11 @@ body.popout .hide-popout { display: none; }
 .lg-vals b { font-weight: 500; }
 .lg-err { color: var(--down); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 420px; }
 .lg-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-left: 2px; }
-.lg-actions { display: flex; gap: 2px; opacity: 0; transition: opacity 0.12s; }
-.lg-row:hover .lg-actions { opacity: 1; }
+.lg-actions { display: flex; gap: 2px; }
+.lg-actions button { opacity: 0; transition: opacity 0.12s; }
+.lg-row:hover .lg-actions button { opacity: 1; }
+/* Remove stays faintly visible, so it can be found without hovering first. */
+.lg-actions button[data-act="remove"], .lg-actions button[data-act="rm-cmp"] { opacity: 0.45; }
 .lg-actions button { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 4px; color: var(--muted); }
 .lg-actions button:hover { color: var(--text-strong); background: var(--panel-2); }
 
@@ -598,6 +602,8 @@ body.popout .hide-popout { display: none; }
 .sr-badge::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--src, var(--muted)); }
 .sr-badge[data-src="binance"] { --src: #F0B90B; }
 .sr-badge[data-src="coinbase"] { --src: #3B82F6; }
+.sr-badge[data-src="bybit"] { --src: #F7A600; }
+.sr-badge[data-src="okx"] { --src: #9CA3AF; }
 .sr-badge[data-src="yahoo"] { --src: #8B5CF6; }
 .sr-badge[data-src="twelvedata"] { --src: #14B8A6; }
 .sr-empty { padding: 18px 12px; color: var(--muted); }
@@ -751,7 +757,7 @@ body.popout .hide-popout { display: none; }
     box-shadow: -12px 0 30px rgba(0, 0, 0, 0.45);
   }
   .brand span, .tb-btn span, .hide-sm { display: none; }
-  .tool-group > button[data-tool], #clear-drawings { width: 34px; height: 34px; }
+  .tool-group > button[data-tool], #clear-drawings, #magnet-btn { width: 34px; height: 34px; }
   .sr-row { grid-template-columns: 90px minmax(0, 1fr) auto; }
   .sr-type, .sr-exch { display: none; }
   .sr-src { min-width: 0; }
