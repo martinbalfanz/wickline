@@ -1,7 +1,7 @@
 // Drawing tools: Shift snaps lines to horizontal (0°) while placing or dragging, and the magnet
 // snaps drawing points to a bar's open, high, low or close. Run: node test/drawings.test.mjs
 import assert from 'node:assert/strict';
-import { DrawingLayer, MAGNET_MODES, anchoredVwap } from '../public/js/drawings.js';
+import { DrawingLayer, MAGNET_MODES, SYMBOL_SIZE, TOOLS, anchoredVwap, isSymbol } from '../public/js/drawings.js';
 
 let n = 0;
 const ok = (name, fn) => { fn(); n++; console.log(`  ok ${name}`); };
@@ -20,6 +20,17 @@ function makeLayer() {
   layer.setBars(Array.from({ length: 100 }, (_, i) => ({ time: 1000 * i, open: 50, high: 60, low: 40, close: 55 })));
   layer.setContext('TEST', 1000);
   return layer;
+}
+
+/** A canvas context that records its calls. */
+function recorder() {
+  const calls = [];
+  const ctx = new Proxy({}, {
+    get: (_, k) => (k === 'measureText' ? (s) => ({ width: String(s).length * 8 })
+      : k === 'roundRect' ? undefined : (...a) => calls.push([k, ...a])),
+    set: (_, k, v) => { calls.push(['set', k, v]); return true; },
+  });
+  return { ctx, calls };
 }
 
 const place = (layer, tool, a, b, shift = false) => {
@@ -252,6 +263,92 @@ ok('anchored VWAP drawing: one click anchors it at that bar; it can be picked up
   const [[name, hx, hy]] = l._handles(d);
   assert.deepEqual([name, hx, Math.round(hy)], ['p1', 300, Math.round(y)]);
   assert.ok(!Object.keys(d).some((k) => k.startsWith('_vwap')), 'the cache is not saved with the drawing');
+});
+
+// --- arrow symbols -------------------------------------------------------------------------
+ok('arrow symbols are one-point tools with a label and size', () => {
+  assert.ok(isSymbol('arrowUp') && isSymbol('arrowDown') && !isSymbol('trend'));
+  const l = makeLayer();
+  l.setTool('arrowDown');
+  l.handleClick({ point: { x: 300, y: 500 } });
+  const d = l.items[0];
+  assert.equal(d.type, 'arrowDown');
+  assert.equal(d.text, '');
+  assert.equal(d.size, SYMBOL_SIZE.default);
+  assert.equal(l.tool, 'cursor', 'back to the cursor after placing');
+  assert.equal(l.selectedId, d.id);
+  assert.equal(l.focusText, true);
+});
+
+ok('the label and size can be edited, and size stays within its limits', () => {
+  const l = makeLayer();
+  l.setTool('arrowUp');
+  l.handleClick({ point: { x: 300, y: 500 } });
+  l.updateSelected({ text: '17', size: 24 });
+  assert.equal(l.selected.text, '17');
+  assert.equal(l.selected.size, 24);
+  l.updateSelected({ size: 999 });
+  assert.equal(l.selected.size, SYMBOL_SIZE.max);
+  l.updateSelected({ size: 1 });
+  assert.equal(l.selected.size, SYMBOL_SIZE.min);
+  l.setTool('arrowDown');
+  l.handleClick({ point: { x: 400, y: 500 } });
+  assert.equal(l.items[1].size, SYMBOL_SIZE.min, 'the next symbol starts at the last size used');
+});
+
+ok('▼ sits above its price with the label on top; ▲ below with the label underneath', () => {
+  const l = makeLayer();
+  const down = l._symbolGeom({ type: 'arrowDown', size: 20 }, 300, 500);
+  assert.ok(down.tipY < 500 && down.tailY < down.tipY && down.labelY < down.tailY);
+  const up = l._symbolGeom({ type: 'arrowUp', size: 20 }, 300, 500);
+  assert.ok(up.tipY > 500 && up.tailY > up.tipY && up.labelY > up.tailY);
+});
+
+ok('a symbol is selectable by clicking its arrow or label, and not far away', () => {
+  const l = makeLayer();
+  l.setTool('arrowDown');
+  l.handleClick({ point: { x: 300, y: 500 } });
+  l.updateSelected({ text: 'Sell 13', size: 20 });
+  const id = l.items[0].id;
+  assert.equal(l.hitTest(300, 480), id, 'on the arrow');
+  assert.equal(l.hitTest(300, 440), id, 'on the label');
+  assert.equal(l.hitTest(300, 560), null);
+  assert.equal(l.hitTest(600, 480), null);
+});
+
+ok('dragging a symbol moves it', () => {
+  const l = makeLayer();
+  l.setTool('arrowUp');
+  l.handleClick({ point: { x: 300, y: 500 } });
+  const d = l.items[0];
+  assert.ok(l.beginDrag(300, 515));
+  l.dragMove(400, 415);
+  l.endDrag();
+  assert.equal(d.p1.time, 40000);
+  assert.equal(Math.round(d.p1.price), 60); // 50 + the 10 the pointer moved up
+});
+
+ok('drawing a symbol paints the arrow and the label, and survives a missing label', () => {
+  const l = makeLayer();
+  l.setTool('arrowDown');
+  l.handleClick({ point: { x: 300, y: 500 } });
+  const d = l.items[0];
+  let r = recorder();
+  l._drawItem(r.ctx, d, { width: 800, height: 600 }, false);
+  assert.ok(r.calls.some((c) => c[0] === 'fill'));
+  assert.ok(!r.calls.some((c) => c[0] === 'fillText'), 'no label, no text');
+  l.updateSelected({ text: '13', size: 30 });
+  r = recorder();
+  l._drawItem(r.ctx, d, { width: 800, height: 600 }, true);
+  const text = r.calls.find((c) => c[0] === 'fillText');
+  assert.deepEqual(text.slice(0, 2), ['fillText', '13']);
+  assert.ok(r.calls.some((c) => c[0] === 'set' && c[1] === 'font' && String(c[2]).includes('30px')));
+  assert.ok(r.calls.some((c) => c[0] === 'arc'), 'selected: a handle is drawn');
+});
+
+ok('the tools are registered', () => {
+  assert.equal(TOOLS.arrowUp.points, 1);
+  assert.equal(TOOLS.arrowDown.points, 1);
 });
 
 console.log(`drawings: ${n} checks passed`);
