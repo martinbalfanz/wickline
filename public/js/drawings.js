@@ -6,6 +6,7 @@ import { t } from './i18n.js';
 import { fixed, store as settings } from './util.js';
 import { STROKE_TOOLS, strokeOf } from './stroke.js';
 import { activeLevels, fibOf, labelText, levelPrice } from './fib.js';
+import { LABEL_TOOLS } from './point-editor.js';
 
 export const TOOLS = {
   cursor: { label: t('draw.tool.cursor'), points: 0 },
@@ -742,6 +743,7 @@ export class DrawingLayer {
       default: break;
     }
     if (['hline', 'hray', 'vline', 'text', 'arrowUp', 'arrowDown'].includes(d.type)) {
+      this._drawLineLabel(ctx, d, size);
       if (active) for (const [, hx, hy] of this._handles(d)) this._handle(ctx, hx, hy, d.color);
       return;
     }
@@ -856,10 +858,38 @@ export class DrawingLayer {
       }
       default: break;
     }
+    this._drawLineLabel(ctx, d, size);
     if (active) for (const [, hx, hy] of this._handles(d)) this._handle(ctx, hx, hy, d.color);
   }
 
+  /** A line's or shape's own label (set in the point editor, issue #6), in its color, beside it. */
+  _drawLineLabel(ctx, d, size) {
+    if (!d.label || d.labels === false || !LABEL_TOOLS.has(d.type)) return;
+    const x1 = this._x(d.p1.time), y1 = this._y(d.p1.price);
+    const x2 = this._x(d.p2.time), y2 = this._y(d.p2.price);
+    let x, y, align = 'center', base = 'bottom';
+    switch (d.type) {
+      case 'hline': x = size.width - 8; y = y1 - 4; align = 'right'; break;
+      case 'hray': if (x1 == null) return; x = x1 + 8; y = y1 - 4; align = 'left'; break;
+      case 'vline': if (x1 == null) return; x = x1 + 6; y = 16; align = 'left'; base = 'top'; break;
+      case 'rect': if (x1 == null || x2 == null || y2 == null) return; x = Math.min(x1, x2) + 4; y = Math.min(y1, y2) - 4; align = 'left'; break;
+      default: if (x1 == null || x2 == null || y2 == null) return; x = (x1 + x2) / 2; y = (y1 + y2) / 2 - 6; // above the middle of the line
+    }
+    if (y1 == null || y == null) return;
+    ctx.save();
+    ctx.setLineDash([]);
+    ctx.font = '600 12px -apple-system, "Segoe UI", Roboto, sans-serif';
+    ctx.textAlign = align;
+    ctx.textBaseline = base;
+    ctx.shadowColor = this.theme.bg;
+    ctx.shadowBlur = 4;
+    ctx.fillStyle = d.color;
+    ctx.fillText(d.label, x, y);
+    ctx.restore();
+  }
+
   _handle(ctx, x, y, color) {
+    ctx.setLineDash([]); // a dashed or dotted line's handles are still solid circles
     ctx.beginPath();
     ctx.arc(x, y, 4.5, 0, Math.PI * 2);
     ctx.fillStyle = this.theme.bg;

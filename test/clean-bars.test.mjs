@@ -1,6 +1,6 @@
 // Tests for lib/clean-bars.mjs: bad prints are clipped, real moves are kept.
 import assert from 'node:assert/strict';
-import { cleanSpikes, fixFxDailyCloses } from '../lib/clean-bars.mjs';
+import { cleanSpikes, fixFxDailyCloses, isStaleHistory, spliceFreshTail } from '../lib/clean-bars.mjs';
 
 const bar = (i, o, h, l, c) => ({ time: i * 300, open: o, high: h, low: l, close: c, volume: 100 });
 // A quiet stretch around 100: bodies 99.9-100.2, wicks +-0.2.
@@ -99,6 +99,23 @@ test('daily forex: bars that already look right are left alone', () => {
   const before = JSON.stringify(bars);
   fixFxDailyCloses(bars);
   assert.equal(JSON.stringify(bars), before);
+});
+
+// Issue #7: Yahoo served MSFT's daily history ending in 2025 while it traded in Nov 2026.
+test('a history whose last bar is weeks behind the latest trade is stale; weekends and holidays are not', () => {
+  const D = 86400, fri = Date.UTC(2026, 10, 20) / 1000;
+  assert.equal(isStaleHistory(Date.UTC(2025, 8, 15) / 1000, fri + 3 * D, D), true, 'a year behind');
+  assert.equal(isStaleHistory(fri, fri + 3 * D + 15 * 3600, D), false, "Friday's bar on Monday afternoon");
+  assert.equal(isStaleHistory(fri - 4 * D, fri, D), false, 'a holiday week');
+  assert.equal(isStaleHistory(Date.UTC(2026, 9, 1) / 1000, Date.UTC(2026, 9, 30) / 1000, 30 * D), false, 'a monthly bar is a month long');
+  assert.equal(isStaleHistory(fri, undefined, D), false, 'no market time: not stale');
+});
+
+test('the fresh tail replaces the old one from its first bar on', () => {
+  const b = (t, c) => ({ time: t, open: c, high: c, low: c, close: c, volume: 1 });
+  const old = [b(1, 10), b(2, 11), b(3, 12)];
+  assert.deepEqual(spliceFreshTail(old, [b(3, 20), b(4, 21), b(9, 22)]).map((x) => [x.time, x.close]), [[1, 10], [2, 11], [3, 20], [4, 21], [9, 22]]);
+  assert.equal(spliceFreshTail(old, []), old);
 });
 
 console.log(failed ? `\n${failed} failed` : '\nall passed');

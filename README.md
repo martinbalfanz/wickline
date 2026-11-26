@@ -121,6 +121,7 @@ A free, open-source charting platform.
 - **On the chart:** entry and exit markers, plus a line from each entry to its exit.
 
 **Bar replay and paper trading**
+- **Back to now:** scrolled back in history, the » button in the corner of the chart brings the latest candle back into view.
 - **Bar replay:** go back to any point in history and replay the chart candle by candle.
   - Start from a candle you click, a date, or a random point.
   - Step one candle at a time, or play at 0.5× to 10× (candles per second).
@@ -142,6 +143,7 @@ A free, open-source charting platform.
   - **Arrow symbols:** up and down arrows with an optional label (a count, a note…) and an adjustable size; the label and the arrow scale together.
   - **Analysis:** Fibonacci retracement, measure, long position, short position (click the entry, then the target; or click twice in one spot for a ready-made one).
 - **Editing:** drag drawings and their handles. Change colors from the drawing's toolbar, and hide the labels of a position or anchored VWAP there too.
+- **Exact values:** double-click a drawing (or press the pencil in its toolbar) to type the price and date of each of its points, the entry, target and stop of a position, and a label for a line, level or rectangle.
 - **Magnet:** the magnet button in the drawing toolbar cycles **off → weak → strong**. Weak snaps a point you place or drag to the bar's open, high, low or close when the pointer is close to it; strong always snaps to the nearest of the four. A ring shows where it is snapping.
 - **Fib retracement settings:** the gear on a selected Fib opens its levels and options. Change a level's number (0.5 is 50%; "50%" works too), color, or turn it off; add or remove levels; show or hide the trend line, level numbers, prices and the background; extend the lines to the left or right; and space the levels on a log scale.
 - **Line style:** a selected trend line, ray, extended line, arrow, channel or level line can be solid, dashed or dotted, and any thickness from 1 to 20 px, from the drawing's toolbar.

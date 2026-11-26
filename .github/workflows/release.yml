@@ -104,6 +104,6 @@ jobs:
             echo
             echo 'Every file is built by GitHub Actions straight from the public code. To check a download, compare its SHA-256 with this list (Windows: `certutil -hashfile <file> SHA256`; Mac and Linux: `shasum -a 256 <file>`), or look it up on VirusTotal:'
             echo
-            while read -r h f; do f="${f#\*}"; echo "- \`$f\`:\`$h\` ([VirusTotal](https://www.virustotal.com/gui/file/$h))"; done < SHA256SUMS.txt
+            while read -r h f; do f="${f#\*}"; echo "- \`$f\`: \`$h\` ([VirusTotal](https://www.virustotal.com/gui/file/$h))"; done < SHA256SUMS.txt
           } >> notes.md
           gh release edit "v$V" --repo "$GITHUB_REPOSITORY" --notes-file notes.md

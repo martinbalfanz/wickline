@@ -229,6 +229,13 @@ body[data-resizing] .cell { pointer-events: none; }
 }
 .chart-host.drawing { cursor: crosshair; }
 
+/* "Go to the latest candle" (chart-view.js updateToLatest), in the corner of the price pane. */
+.to-latest {
+  position: absolute; z-index: 5; width: 30px; height: 30px; display: grid; place-items: center;
+  border-radius: 50%; background: var(--panel-2); color: var(--text-strong); border: 1px solid var(--border);
+  box-shadow: var(--shadow); opacity: 0.85; cursor: pointer;
+}
+.to-latest:hover { opacity: 1; background: var(--accent-soft); color: var(--accent-text); }
 .cell-tools {
   position: absolute; top: 6px; right: 74px; z-index: 5;
   display: flex; gap: 2px; padding: 2px;
@@ -277,7 +284,8 @@ body.popout .hide-popout { display: none; }
 .legend, .pane-legend {
   position: absolute; left: 10px; z-index: 3;
   pointer-events: none; max-width: calc(100% - 90px);
-  text-shadow: 0 0 3px var(--bg), 0 0 3px var(--bg), 0 0 2px var(--bg);
+  /* A halo in the chart's own color: invisible on the background, it keeps text readable over lines and candles. */
+  text-shadow: 0 0 2px var(--chart-bg, var(--bg)), 0 0 2px var(--chart-bg, var(--bg));
 }
 .legend { top: 6px; }
 .pane-legends { position: absolute; inset: 0; pointer-events: none; }
@@ -707,6 +715,15 @@ body.popout .hide-popout { display: none; }
 .pop-field input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
 .pop-note { color: var(--muted); margin: 0 0 10px; }
 .pop-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+/* The point editor (point-editor.js, issue #6): exact prices, dates and a label for a drawing. */
+.point-editor .pop-section:first-of-type { margin-top: 0; padding-top: 0; border-top: 0; }
+.pe-field { display: grid; grid-template-columns: 92px minmax(0, 1fr); align-items: center; gap: 8px; margin-bottom: 6px; }
+.pe-field span { color: var(--muted); font-size: 12px; }
+.pe-field input {
+  min-width: 0; height: 28px; padding: 0 8px; font: inherit; font-variant-numeric: tabular-nums;
+  background: var(--bg); color: var(--text-strong); border: 1px solid var(--panel-2); border-radius: var(--radius);
+}
+.pe-field input:focus { outline: none; border-color: var(--accent); }
 .pop-section { margin: 10px 0 6px; padding-top: 8px; border-top: 1px solid var(--panel-2); color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
 .pop-section:empty { margin: 8px 0; padding: 0; }
 .fib-levels { max-height: 220px; overflow-y: auto; }

@@ -83,6 +83,21 @@ app.whenReady().then(async () => {
     // Daily forex (the last chart opened): Yahoo's closes are rebuilt, so the candles have bodies.
     const fx = await run(`(() => { const b = window.__wickline.views()[0].bars.slice(-60, -1); return { n: b.length, flat: b.filter((x) => Math.abs(x.close - x.open) < 0.05 * (x.high - x.low)).length }; })()`);
     check('daily forex candles have real bodies', fx.n > 40 && fx.flat < fx.n * 0.2, JSON.stringify(fx));
+    // Issue #7: scrolled back, the » button shows; it brings the newest candle back.
+    const latest = await run(`(async () => { const v = window.__wickline.views()[0]; const ts = v.chart.timeScale(); const r = ts.getVisibleLogicalRange();
+      ts.setVisibleLogicalRange({ from: r.from - 400, to: r.to - 400 }); await new Promise((ok) => setTimeout(ok, 1500));
+      const btn = v.el.querySelector('.to-latest'); const shown = !btn.hidden; btn.click(); await new Promise((ok) => setTimeout(ok, 1200));
+      return { shown, back: ts.getVisibleLogicalRange().to >= v.bars.length - 2, hiddenAfter: btn.hidden }; })()`);
+    check('the » button brings back the latest candle', latest.shown && latest.back && latest.hiddenAfter, JSON.stringify(latest));
+    // Issue #6: a drawing's exact prices and dates, and a label.
+    const edit = await run(`(async () => { const v = window.__wickline.views()[0]; const b = v.bars, n = b.length;
+      v.drawings.items.push({ id: 'e2e-ed', type: 'trend', color: '#4FA3F7', p1: { time: b[n - 30].time, price: b[n - 30].close }, p2: { time: b[n - 3].time, price: b[n - 3].close } });
+      v.drawings.select('e2e-ed'); document.querySelector('.draw-bar [data-db="edit"]').click(); await new Promise((ok) => setTimeout(ok, 200));
+      const ed = document.querySelector('.point-editor'); const price = ed.querySelector('[data-key="p2"] [data-pe="price"]'); price.value = '123.25'; price.dispatchEvent(new Event('change', { bubbles: true }));
+      const label = ed.querySelector('[data-pe="label"]'); label.value = 'e2e'; label.dispatchEvent(new Event('change', { bubbles: true }));
+      const d = v.drawings.items.find((x) => x.id === 'e2e-ed'); const fields = ed.querySelectorAll('input').length; ed.querySelector('[data-pe="done"]').click(); v.drawings.deleteSelected();
+      return { open: !!ed, fields, price: d.p2.price, label: d.label, closed: ed.hidden }; })()`);
+    check('the point editor sets a drawing\'s exact price and its label', edit.fields === 5 && edit.price === 123.25 && edit.label === 'e2e' && edit.closed, JSON.stringify(edit));
     // Bybit and OKX: in the symbol search and as whole markets.
     const exch = await run(`import('./js/datafeed.js').then(async (m) => ({ search: [...new Set((await m.searchCrypto('SOL')).map((r) => r.full.split(':')[0]))],
       markets: Object.fromEntries(await Promise.all(['bybit', 'bybitf', 'okx', 'okxf'].map(async (id) => [id, (await m.loadUniverse(id)).length]))) }))`);
@@ -445,8 +460,8 @@ app.whenReady().then(async () => {
     const gains = await run(`[...document.querySelectorAll('.sc-table tbody tr')].slice(0, 15).map((r) => parseFloat(r.children[2].textContent.replace('−', '-')))`);
     check('"Top gainers" lists rising stocks, biggest first', gains.length > 0 && gains.every((g, k) => g > 0 && (k === 0 || g <= gains[k - 1])), gains.slice(0, 5).join(', '));
     const scSym = await run(`(() => { const tr = document.querySelector('.sc-table tbody tr[data-row="1"]'); tr.click(); return tr.querySelector('.sc-sym b').textContent; })()`);
-    await wait(3000);
-    const scChart = await run(`document.querySelector('.cell .lg-title').innerText`);
+    let scChart = '';
+    for (let i = 0; i < 30; i++) { await wait(500); scChart = await run(`document.querySelector('.cell .lg-title').innerText`); if (scChart.startsWith(scSym + ' ')) break; }
     check('clicking a screener row opens that stock', scChart.startsWith(scSym + ' '), `${scSym} -> ${scChart.split('\n')[0]}`);
     // Another market: Japan's largest stocks, with local codes (7203, not 7203.T) and caps in yen.
     await run(`(() => { const s = document.querySelector('#screener [data-f="market"]'); s.value = 'JP'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
@@ -466,8 +481,15 @@ app.whenReady().then(async () => {
     // 10. Symbol search: one box for every source, and each result says where its data comes from.
     const search = async (q) => {
       await run(`(() => { const i = document.querySelector('#search-input'); i.value = ${JSON.stringify(q)}; i.dispatchEvent(new Event('input')); })()`);
-      await wait(2500);
-      return run(`[...document.querySelectorAll('#search-results .sr-row')].map((r) => ({ t: r.querySelector('.sr-ticker').textContent, src: r.querySelector('.sr-badge')?.textContent }))`);
+      let rows = [];
+      for (let i = 0; i < 20; i++) {
+        await wait(500);
+        rows = await run(`[...document.querySelectorAll('#search-results .sr-row')].map((r) => ({ t: r.querySelector('.sr-ticker').textContent, src: r.querySelector('.sr-badge')?.textContent }))`);
+        if (i >= 4 && rows.some((r) => r.src === 'Yahoo')) break;
+        // Yahoo throttles bursts (this suite sends many): search again once, as a person would.
+        if (i === 12) await run(`document.querySelector('#search-input').dispatchEvent(new Event('input'))`);
+      }
+      return rows;
     };
     // Command+K (macOS) and Ctrl+K (Windows/Linux) use the existing symbol picker.
     for (const modifier of ['metaKey', 'ctrlKey']) {

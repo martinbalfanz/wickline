@@ -6,9 +6,10 @@ import * as LWC from '../vendor/lightweight-charts.mjs';
 import { createFeed, tfById, parseSymbol, displayTicker, isCryptoSymbol, sourceName } from './datafeed.js';
 import { tfIdOf } from './timeframes.js';
 import { INDICATORS, PALETTE, UP, DOWN, defaultParams, indicatorLabel, optionLabel, heikinAshi, heikinAshiAt } from './indicators.js';
-import { DrawingLayer, DRAW_COLORS, SYMBOL_SIZE, isSymbol } from './drawings.js';
+import { DrawingLayer, DRAW_COLORS, SYMBOL_SIZE, TOOLS, isSymbol } from './drawings.js';
 import { applyEntryVisibility, isHidden, setHiddenFlag, syncMarkers } from './entry-visibility.js';
 import { closeFibPanel, fibPanelId, openFibPanel } from './fib-panel.js';
+import { closePointEditor, editablePoints, openPointEditor, pointEditorId, refreshPointEditor } from './point-editor.js';
 import { STROKE_STYLES, STROKE_TOOLS, STROKE_WIDTH, clampWidth, strokeOf } from './stroke.js';
 import { BandFill, Countdown, TradeLines } from './primitives.js';
 import { engine, scriptStore } from './scripts.js';
@@ -153,6 +154,7 @@ const ICON_PAUSE = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M7.
 const ICON_STEP = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M6 5.5v13l9-6.5z" fill="currentColor"/><path d="M16.5 5.5h2.5v13h-2.5z" fill="currentColor"/></svg>';
 const ICON_CUT = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M12 3v18" stroke="currentColor" stroke-width="1.8" stroke-dasharray="2.5 2.5"/><path d="M5 9l-2 3 2 3M19 9l2 3-2 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 export const REPLAY_SPEEDS = [[0.5, '0.5×'], [1, '1×'], [2, '2×'], [3, '3×'], [5, '5×'], [10, '10×']];
+const ICON_TO_LATEST = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M6 7l5 5-5 5M12 7l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const ICON_BELL = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20a2 2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
 const EYE = '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>';
 const eyeIcon = (extra = '') => `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${EYE}${extra}</svg>`;
@@ -165,6 +167,7 @@ const STROKE_ICONS = {
   dotted: '<path d="M3.5 12h.01M8.5 12h.01M13.5 12h.01M18.5 12h.01" stroke-width="3"/>',
 };
 const strokeIcon = (style) => `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">${STROKE_ICONS[style]}</svg>`;
+const ICON_EDIT = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
 const ICON_LABELS = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M4 7V5h11v2M9.5 5v13M7.5 18h4M14 12h6M17 12v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 /**
@@ -274,6 +277,7 @@ export class ChartView {
         </label>
         <button data-db="alert" title="${t('chart.alertAtPrice')}" hidden>${ICON_BELL}</button>
         <button data-db="labels" class="db-labels" hidden>${ICON_LABELS}</button>
+        <button data-db="edit" title="${t('draw.edit')}" aria-label="${t('draw.edit')}" hidden>${ICON_EDIT}</button>
         <button data-db="fib" title="${t('common.settings')}" aria-label="${t('common.settings')}" hidden>${ICON_GEAR}</button>
         <button data-db="delete" title="${t('chart.deleteDel')}">${ICON_TRASH}</button>
       </div>
@@ -297,6 +301,7 @@ export class ChartView {
         <button data-cell="max" title="${t('chart.maxTitle')}" aria-label="${t('chart.maxAria')}">${ICON_MAX}</button>
         <button data-cell="pop" title="${t('chart.popout')}" aria-label="${t('chart.popout')}">${ICON_POP}</button>
       </div>
+      <button class="to-latest" hidden title="${t('chart.toLatest')}" aria-label="${t('chart.toLatest')}">${ICON_TO_LATEST}</button>
       <div class="overlay loading" hidden><div class="spinner"></div></div>
       <div class="overlay error" hidden></div>`;
     host.append(this.el);
@@ -452,6 +457,15 @@ export class ChartView {
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', up);
     }, true);
+    this.chartEl.addEventListener('dblclick', (e) => {
+      const p = this.paneCoords(e);
+      if (!p || this.replayPick || this.drawings.tool !== 'cursor') return;
+      const id = this.drawings.hitTest(p.x, p.y);
+      if (!id) return;
+      e.preventDefault();
+      this.drawings.select(id);
+      this.openPointEditorFor(this.drawings.selected, { x: e.clientX, y: e.clientY });
+    });
     this.chartEl.addEventListener('click', (e) => {
       const start = down;
       down = null;
@@ -472,7 +486,10 @@ export class ChartView {
       if (real || !param.point) this.hooks.onCrosshair?.(this, param);
     });
 
+    const toLatest = this.q('.to-latest');
+    toLatest.addEventListener('click', () => { this.chart.timeScale().scrollToRealTime(); toLatest.hidden = true; });
     this.chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+      this.updateToLatest(range);
       if (!range || this.loadingOlder || !this.feed?.canLoadMore || !this.bars.length) return;
       if (range.from < 40) this.loadOlder();
     });
@@ -546,6 +563,7 @@ export class ChartView {
         if (d) this.hooks.onCreateAlert?.(this, d.p1.price);
       }
       if (act === 'fib') this.toggleFibPanel(e.target.closest('[data-db="fib"]'));
+      if (act === 'edit') this.togglePointEditor(e.target.closest('[data-db="edit"]'));
     });
     bar.querySelector('.db-text').addEventListener('input', (e) => this.drawings.updateSelected({ text: e.target.value }));
     bar.querySelector('.db-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.blur(); });
@@ -570,10 +588,33 @@ export class ChartView {
     });
   }
 
+  /** Exact prices, dates and a label for the selected drawing (issue #6; point-editor.js). */
+  openPointEditorFor(d, anchor) {
+    if (!d || !editablePoints(d).length) return;
+    closeFibPanel();
+    closeSettings();
+    openPointEditor(anchor, d, {
+      title: TOOLS[d.type]?.label || '',
+      daily: this.tf.daily,
+      precision: this.meta?.precision ?? 2,
+      decimalComma: (1.5).toLocaleString(locale).includes(','),
+      onChange: (patch) => this.drawings.updateSelected(patch),
+    });
+  }
+
+  togglePointEditor(anchor) {
+    const d = this.drawings.selected;
+    if (!d) return;
+    if (pointEditorId() === d.id) { closePointEditor(); return; }
+    this.openPointEditorFor(d, anchor);
+  }
+
   showDrawBar(d) {
     const bar = this.q('.draw-bar');
     bar.hidden = !d;
     if (!d || fibPanelId() !== d.id) closeFibPanel(); // the panel belongs to the Fib that was selected
+    if (!d || pointEditorId() !== d.id) closePointEditor();
+    else refreshPointEditor(d); // dragged or edited: show the new values
     if (!d) return;
     bar.querySelectorAll('[data-color]').forEach((b) => b.classList.toggle('on', b.dataset.color === d.color));
     const text = bar.querySelector('.db-text');
@@ -604,6 +645,7 @@ export class ChartView {
     const labels = bar.querySelector('[data-db="labels"]');
     labels.hidden = !['long', 'short', 'avwap'].includes(d.type); // a Fib's labels are in its settings
     bar.querySelector('[data-db="fib"]').hidden = d.type !== 'fib';
+    bar.querySelector('[data-db="edit"]').hidden = !editablePoints(d).length;
     const shown = d.labels !== false;
     labels.classList.toggle('on', shown);
     labels.title = t(shown ? 'chart.labelsHide' : 'chart.labelsShow');
@@ -1407,6 +1449,7 @@ export class ChartView {
     this.updateLegend(this.lastCrosshair);
     this.applyPaperMarkers();
     this.updateQuickTrade();
+    this.updateToLatest();
   }
 
   /**
@@ -1436,6 +1479,17 @@ export class ChartView {
         this.needsViewportReset = false;
       }
     });
+  }
+
+  /** The "go to the latest candle" button: shown while the newest candle is off the right edge (issue #7). */
+  updateToLatest(range = this.chart.timeScale().getVisibleLogicalRange()) {
+    const btn = this.q('.to-latest');
+    const off = !!range && this.bars.length > 0 && !this.replay && range.to < this.bars.length - 1.5;
+    if (btn.hidden !== !off) btn.hidden = !off;
+    if (!off) return;
+    // Just inside the corner of the price pane: left of the price scale, above the time scale.
+    btn.style.right = `${(this.chart.priceScale('right').width() || 60) + 10}px`;
+    btn.style.bottom = `${(this.chart.timeScale().height() || 28) + 10}px`;
   }
 
   /** Start time of the bar that a tick at chart time t belongs to, given the last bar's start. */
@@ -1481,6 +1535,18 @@ export class ChartView {
   applyBars(newBars) {
     if (this.replay || !this.bars.length || !newBars?.length) return;
     const first = newBars[0].time;
+    // New bars that start long after the history ends mean the history was an old copy (issue #7):
+    // gluing them on would hide the missing weeks. Load the history again instead (once per
+    // symbol and timeframe every 10 minutes, in case the source keeps sending the old copy).
+    const gap = first - this.bars[this.bars.length - 1].time;
+    if (gap > Math.max(10 * 86400, 50 * this.tf.sec)) {
+      const key = `${this.state.symbol}|${this.tf.id}`;
+      if (this.gapReload?.key !== key || Date.now() - this.gapReload.t > 600000) {
+        this.gapReload = { key, t: Date.now() };
+        this.load();
+        return;
+      }
+    }
     const lastNew = newBars[newBars.length - 1].time;
     const times = new Set(newBars.map((b) => b.time));
 
